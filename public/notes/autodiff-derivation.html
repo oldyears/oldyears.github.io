@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>自动微分推导 — CMU 10-714 hw1</title>
+<script>
+  MathJax = {
+    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+    chtml: { scale: 1.05 }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 820px; margin: 40px auto; line-height: 1.75; padding: 0 24px;
+         color: #1f2328; }
+  h1 { font-size: 1.5em; border-bottom: 2px solid #4a90d9; padding-bottom: 8px; }
+  h2 { font-size: 1.2em; color: #2b5b8c; margin-top: 2.2em; border-left: 4px solid #4a90d9; padding-left: 10px; }
+  h3 { font-size: 1.05em; color: #444; margin-top: 1.6em; }
+  code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.92em; color: #c7254e; }
+  .note { background: #eef6ff; border-left: 4px solid #4a90d9; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .meaning { background: #f0fdf4; border-left: 4px solid #22a06b; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .warn { background: #fff8e6; border-left: 4px solid #d97706; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.93em; }
+  th, td { border: 1px solid #d0d7de; padding: 8px 10px; text-align: left; }
+  th { background: #f6f8fa; }
+  .step { counter-reset: step; }
+  .step ol { padding-left: 28px; }
+  .step ol > li { margin: 6px 0; }
+  /* ===== 交互组件（沿用前两篇档位，保持跨文件一致）===== */
+  .interactive { background:#fafcff; border:1px solid #cfe0f2; border-radius:8px; padding:18px 22px 16px; margin:24px 0; }
+  .interactive .title { font-weight:600; color:#2b5b8c; margin-bottom:14px; font-size:0.95em; }
+  .interactive .hint { color:#888; font-size:0.82em; margin-top:14px; line-height:1.65; }
+  .toggle-btn { background:#4a90d9; color:#fff; border:none; border-radius:5px; padding:6px 14px; font-size:0.82em; cursor:pointer; }
+  .toggle-btn:hover { background:#3b7bc0; }
+  .toggle-btn:disabled { background:#b8ccdf; cursor:default; }
+  /* 计算图 + AD 动画 */
+  .ad-graph { position:relative; height:260px; margin:6px 0; overflow:hidden; }
+  .ad-node { position:absolute; width:52px; height:52px; border-radius:8px; border:2px solid #cdd7e1; background:#f2f5f8;
+             display:flex; flex-direction:column; align-items:center; justify-content:center;
+             font-size:0.8em; color:#5a6673; transition:all .35s ease; }
+  .ad-node .nv { font-size:0.68em; color:#8a97a5; }
+  .ad-node.fwd { border-color:#4a90d9; background:#dbeafe; color:#1e5aa8; box-shadow:0 0 0 3px rgba(74,144,217,.16); }
+  .ad-node.adj { border-color:#22a06b; background:#dcfce7; color:#1a7a4f; box-shadow:0 0 0 3px rgba(34,160,107,.2); }
+  .ad-node.multi { border-color:#d97706; background:#fff4e2; color:#a35a04; }
+  svg.ad-edges { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+  .ad-edge { stroke:#c4cdd6; stroke-width:2; fill:none; transition:stroke .35s; marker-end:url(#arr); }
+  .ad-edge.fwd { stroke:#4a90d9; }
+  .ad-edge.adj { stroke:#22a06b; }
+  .ad-controls { display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .ad-status { font-size:0.85em; color:#2b5b8c; font-weight:500; min-height:1.4em; }
+  .ad-formula { text-align:center; font-size:0.85em; color:#555; margin-top:8px; min-height:1.5em; }
+  .ad-formula .lit { color:#1a7a4f; font-weight:600; }
+  /* 模式对比表高亮 */
+  .cmp-good { color:#1a7a4f; font-weight:600; }
+  .cmp-bad { color:#c0392b; }
+</style>
+</head>
+<body>
+
+<h1>自动微分（Automatic Differentiation）推导详解</h1>
+<p style="color:#666">CMU 10-714 Deep Learning Systems · Homework 1 · 按 Lecture 4（Automatic Differentiation, Tianqi Chen）推导流程整理</p>
+
+<div class="note">
+<strong>这份文档回答：</strong>深度学习框架到底怎么<strong>自动</strong>算梯度？为什么现代框架都用<strong>反向模式 AD + 扩展计算图</strong>，而不是手推、数值微分、符号微分，也不是上一课的 backpropagation？这套算法正是 hw1 要从零实现的 <code>needle</code> 框架内核（Q1~Q4）。
+</div>
+
+<div class="warn">
+<strong>来源说明</strong>：主线整理自 <strong>Lecture 4（Automatic Differentiation, Tianqi Chen）</strong> 的 YouTube 字幕（<code>56WUlMEeAuA</code>），标注"讲课"处均出自该字幕。附录为补充的默认知识，<strong>非讲课原话</strong>。本文只讲推导与思路，不含作业代码实现。前置请先读 <a href="backprop-derivation.html">backprop-derivation.html</a>（Lec3）。
+</div>
+
+<h2 id="framework">0. 坐标系：梯度是机器学习的中心问题</h2>
+
+<p>TQ 一开场就把 AD 钉回三要素框架：假设类 / 损失 / 优化。优化用 SGD，而 SGD 的核心是<strong>算 $\nabla_\theta \ell$</strong>——损失对参数的梯度。所以"怎么自动、高效地算梯度"是几乎所有机器学习算法的中心问题。</p>
+
+<div class="meaning">
+<strong>讲课核心判断</strong>：上一课（Lec3）手推了两层网络的梯度，TQ 直言"以今天模型的复杂度，手推梯度几乎不可行"。这节课的任务就是把手推<strong>自动化</strong>。他会对比四种算梯度的方法，最后落到现代框架都在用的那一种。
+</div>
+
+<h2 id="four-methods">1. 算梯度的四种方法（为什么前三种都不够）</h2>
+
+<table>
+<tr><th>方法</th><th>做法</th><th>问题</th></tr>
+<tr><td><strong>手推</strong> manual</td><td>纸笔推导梯度公式</td><td>复杂模型不可行（Lec3 已领教）</td></tr>
+<tr><td><strong>数值微分</strong> numerical</td><td>有限差分逼近导数定义</td><td>数值误差 + 每个参数要 2 次前向，$n$ 大则极慢</td></tr>
+<tr><td><strong>符号微分</strong> symbolic</td><td>程序自动套求导规则展开公式</td><td>公式爆炸、大量重复计算</td></tr>
+<tr><td class="cmp-good"><strong>自动微分</strong> AD</td><td>在计算图上递推</td><td>✓ 高效、精确、可复用</td></tr>
+</table>
+
+<h3>1.1 数值微分：不用来训练，但用来验证</h3>
+
+<p>由导数定义直接算。TQ 强调用<strong>中心差分</strong>（更精确）：</p>
+<p>$$ \frac{\partial f}{\partial \theta_i} \approx \frac{f(\theta + \epsilon e_i) - f(\theta - \epsilon e_i)}{2\epsilon} $$</p>
+<p>泰勒展开可证：中心差分误差 $O(\epsilon^2)$，而单边差分只有 $O(\epsilon)$——二阶项因正负 $\epsilon$ 抵消（推导见附录 A）。</p>
+
+<div class="meaning">
+<strong>关键用途（会用在作业里）</strong>：数值微分虽不用于训练（慢、有误差），但是<strong>梯度检查</strong>的黄金标准。TQ 给了一个更省的技巧——不逐个参数试 $e_i$，而是取<strong>随机方向 $\delta$</strong>（从单位球采样），检查 $\frac{f(\theta+\epsilon\delta)-f(\theta-\epsilon\delta)}{2\epsilon}$ 是否等于 $\nabla f \cdot \delta$。hw1 提交前就用它验证你实现的 AD 对不对。
+</div>
+
+<h3>1.2 符号微分：为什么"直接展开公式"很浪费</h3>
+
+<p>以 $f(\theta)=\theta_1\theta_2\cdots\theta_n$ 为例，$\partial f/\partial\theta_k = \prod_{i\neq k}\theta_i$。若对每个 $k$ 独立按公式算，每个要 $n-2$ 次乘法、共 $n$ 个参数 → $O(n^2)$ 次乘法。但聪明做法只需 $O(n)$。</p>
+
+<div class="meaning">
+<strong>独到见解（埋下伏笔）</strong>：符号微分慢，是因为各偏导之间<strong>可复用的中间计算没被复用</strong>。TQ 让你记住这个问题——后面会看到，自动微分（前向/反向模式）本质上可以理解为"符号微分 + 复用中间结果的化简"。这正是 AD 高效的根源。
+</div>
+
+<h2 id="comp-graph">2. 计算图：AD 的载体</h2>
+
+<p>计算图是有向无环图（DAG），表示一个函数的计算过程。每个<strong>节点</strong>是一个中间值（一次基本运算的输出），每条<strong>边</strong>是输入-输出依赖关系。</p>
+
+<p>求值方式：把输入放在源节点，按<strong>拓扑序</strong>遍历，每个节点用已算好的输入算出自己的输出——走完全图即得最终输出。这就是 hw1 <strong>Q3 拓扑排序</strong> + <strong>Q1 前向计算</strong>的基础。</p>
+
+<div class="meaning">
+<strong>为什么重要</strong>：计算图既是框架表示计算的标准结构，也是推导 AD 的核心工具。后面前向/反向模式 AD 都是"在计算图上按某种顺序递推一个量"。needle 框架（hw1）的每个 <code>Value</code> 节点就对应图里的一个中间值。
+</div>
+
+<h2 id="forward-mode">3. 前向模式 AD：从输入端递推 $\dot v_i$</h2>
+
+<p>定义每个节点的<strong>前向导数</strong> $\dot v_i = \dfrac{\partial v_i}{\partial x_1}$（对某个选定输入 $x_1$）。从输入端开始递推：</p>
+<ul>
+<li>输入节点：$\dot v_1 = \frac{\partial x_1}{\partial x_1}=1$，其余输入 $\dot v_j=0$（好算，所以从头开始）</li>
+<li>中间节点：用链式法则，如 $\dot v_3 = \dot v_1 / v_1$（若 $v_3=\log v_1$）、$\dot v_4=\dot v_1 v_2 + \dot v_2 v_1$（若 $v_4=v_1v_2$）</li>
+</ul>
+
+<div class="warn">
+<strong>前向模式的致命局限</strong>：函数 $n$ 输入、$k$ 输出时，前向模式<strong>一趟只能算出所有输出对"一个输入"的导数</strong>。$n$ 小 $k$ 大时很好；但深度学习恰恰相反——<strong>损失是 1 个标量输出，参数有几百万个输入</strong>。用前向模式要跑 $n$ 趟，不可接受。所以需要反向模式。
+</div>
+
+<h2 id="reverse-mode">4. 反向模式 AD：从输出端递推伴随值（本课核心）</h2>
+
+<p>定义每个节点的<strong>伴随值（adjoint）</strong> $\bar v_i = \dfrac{\partial y}{\partial v_i}$（标量输出 $y$ 对该节点的导数）。从<strong>输出端</strong>反向递推：</p>
+
+<div class="step">
+<ol>
+<li>输出节点：$\bar v_{\text{out}} = \frac{\partial y}{\partial y}=1$（trivial，所以从末端开始）</li>
+<li>其余节点：由"下游节点的伴随值 × 本节点对下游的偏导"回传。如 $v_7=v_6-v_5$ 时 $\bar v_6 = \bar v_7\cdot 1$、$\bar v_5=\bar v_7\cdot(-1)$</li>
+</ol>
+</div>
+
+<p>走到输入节点时，$\bar v_1 = \frac{\partial y}{\partial x_1}$、$\bar v_2=\frac{\partial y}{\partial x_2}$……<strong>一次反向遍历，得到所有输入的梯度</strong>。这正是深度学习要的：一趟 backward 拿到全部参数梯度。</p>
+
+<div class="interactive" id="ad-demo">
+  <div class="title">🎬 动画：反向模式 AD 如何一趟算出所有梯度（含多路径累加）</div>
+  <div class="ad-graph" id="ad-graph"></div>
+  <div class="ad-formula" id="ad-formula"></div>
+  <div class="ad-controls">
+    <button class="toggle-btn" id="ad-step">下一步 ▶</button>
+    <button class="toggle-btn" id="ad-play">自动播放</button>
+    <button class="toggle-btn" id="ad-reset">重置</button>
+    <span class="ad-status" id="ad-status">点"下一步"：先前向求值，再反向传伴随值</span>
+  </div>
+  <div class="hint">
+    <span style="color:#1e5aa8;font-weight:600">蓝色</span> = 前向求值（拓扑序）；
+    <span style="color:#1a7a4f;font-weight:600">绿色</span> = 反向传伴随值 $\bar v_i$（逆拓扑序）；
+    <span style="color:#d97706;font-weight:600">橙色</span> = <strong>多路径节点</strong>：$v_1$ 被 $v_2,v_3$ 同时使用，其伴随值要把两条路径的贡献<strong>相加</strong>。<br>
+    关键观察：反向<strong>一趟</strong>就填满了所有节点的 $\bar v_i$；到输入节点 $\bar v_1$ 即 $\partial y/\partial x_1$，全部梯度一次拿到。
+  </div>
+</div>
+
+<h3 id="multipath">4.1 多路径情形：伴随值为什么要相加</h3>
+
+<p>若 $v_1$ 被 $v_2$ 和 $v_3$ 同时使用，则 $y$ 是 $v_2,v_3$ 的函数，二者又都是 $v_1$ 的函数。按多元链式法则：</p>
+<p>$$ \bar v_1 = \frac{\partial y}{\partial v_2}\frac{\partial v_2}{\partial v_1} + \frac{\partial y}{\partial v_3}\frac{\partial v_3}{\partial v_1} = \bar v_2\frac{\partial v_2}{\partial v_1} + \bar v_3\frac{\partial v_3}{\partial v_1} $$</p>
+
+<p>TQ 引入<strong>部分伴随（partial adjoint）</strong>记号 $\overline{v_{i\to j}} = \bar v_j \cdot \dfrac{\partial v_j}{\partial v_i}$，挂在<strong>边</strong>上；节点伴随值 = 所有出边部分伴随之和：</p>
+<p>$$ \bar v_i = \sum_{j \in \text{next}(i)} \overline{v_{i\to j}} $$</p>
+
+<div class="meaning">
+<strong>为什么这对实现很关键</strong>：这个"边上累加"的视角直接决定了 hw1 <strong>Q4</strong> 的实现结构——用一个 <code>node_to_grad</code> 字典把每个节点映射到它的<strong>部分伴随列表</strong>，逆拓扑序遍历时，走到节点 $i$ 时它的列表已被下游填满，求和即得 $\bar v_i$。多路径的"相加"就是列表求和。
+</div>
+
+<h2 id="extend-graph">5. 关键升华：反向 AD 不算数值，而是"扩展计算图"</h2>
+
+<p>手推 AD 时我们写下每个伴随值的<strong>具体数值</strong>。但现代框架不这么做——TQ 揭示了真正的做法：反向传播时<strong>不算数值，而是构造新的计算图节点</strong>。</p>
+
+<p>即：输入是一个计算图，输出是<strong>另一个更大的计算图</strong>——它既含原来的前向计算，又含新增的、计算各伴随值的梯度计算节点。</p>
+
+<div class="meaning">
+<strong>这带来两个"免费"的大好处</strong>（TQ 反复强调这是全课最重要的一张图）：
+<ol>
+<li><strong>梯度的梯度免费</strong>：因为梯度本身也是计算图，想要 $\nabla(\bar v_1^2)$ 这类"对梯度再求梯度"，只需在梯度图上再跑一遍同样的 AD 算法即可。二阶导数白送。</li>
+<li><strong>可复用 + 可优化</strong>：梯度图对任意输入值都能重新求值（手推的数值只对一组特定输入有效）；而且它还是个普通计算图，框架能对它做算子融合等底层优化。</li>
+</ol>
+</div>
+
+<h2 id="vs-backprop">6. 反向模式 AD vs 上一课的 backpropagation</h2>
+
+<table>
+<tr><th></th><th>Backpropagation（Lec3）</th><th>反向模式 AD + 扩展图（Lec4）</th></tr>
+<tr><td>做法</td><td>在<strong>原图</strong>上直接反向算数值</td><td>构造<strong>新的梯度计算图</strong></td></tr>
+<tr><td>梯度的梯度</td><td class="cmp-bad">难（只定义了一次反向）</td><td class="cmp-good">免费（再跑一遍 AD）</td></tr>
+<tr><td>底层优化</td><td class="cmp-bad">受限</td><td class="cmp-good">梯度图可被融合/优化</td></tr>
+<tr><td>代表框架</td><td>caffe、cuda-convnet（一代）</td><td>Theano→TensorFlow、PyTorch（二代起）</td></tr>
+</table>
+
+<div class="meaning">
+<strong>历史独到见解</strong>：TQ 指出 backprop 是 Hinton 最初用的、一代框架（AlexNet 时代的 caffe/cuda-convnet）的主流；Theano 首创"扩展计算图"思路；二代 TensorFlow/PyTorch 全面转向反向模式 AD。<strong>现代框架不再在原图上就地反向，而是构造额外的梯度计算图</strong>——就为了上面那两个好处。
+</div>
+
+<h2 id="tensor">7. 从标量到张量：伴随值的泛化</h2>
+
+<p>前面都用标量推导。神经网络里中间值都是张量。泛化很自然：矩阵 $Z$ 的伴随 $\bar Z$ 定义为<strong>同形状</strong>的矩阵，每个元素是 $y$ 对该元素的伴随值。</p>
+
+<p>用标量规则逐元素推，再写回矩阵形式。以线性层 $Z_{ij}=\sum_k X_{ik}W_{kj}$ 为例，推得：</p>
+<p>$$ \bar X = \bar Z\, W^\top $$</p>
+<p>这正是 Lec3 手推过的线性层梯度——现在从 AD 视角自然得出。实现上，张量版和标量版<strong>结构完全相同</strong>，只是每个节点存的是多维数组。</p>
+
+<h2 id="homework">8. 和作业 hw1 的对应关系（给思路，不给实现）</h2>
+
+<table>
+<tr><th>hw1 题目</th><th>对应本文</th><th>要点</th></tr>
+<tr><td><strong>Q1 前向计算</strong></td><td>§2 计算图求值</td><td>为每个算子实现 forward：给输入算输出</td></tr>
+<tr><td><strong>Q2 反向计算</strong></td><td>§4 / §7 张量伴随</td><td>为每个算子实现 <strong>VJP</strong>：给输出伴随，算各输入的部分伴随</td></tr>
+<tr><td><strong>Q3 拓扑排序</strong></td><td>§2 拓扑序遍历</td><td>反向要按逆拓扑序，先得能求拓扑序</td></tr>
+<tr><td><strong>Q4 反向模式微分</strong></td><td>§4.1 / §5 扩展图</td><td><code>node_to_grad</code> 存部分伴随列表，逆序遍历求和</td></tr>
+<tr><td><strong>Q5/Q6</strong></td><td>复用 hw0</td><td>softmax loss、两层网络，换成 needle 张量</td></tr>
+</table>
+
+<div class="meaning">
+<strong>实现思路（不含代码）</strong>：hw1 的核心是 Q2+Q4。Q2 是"每个算子会算自己的 VJP"（对应 Lec3 §6 说的：每层只需会把传入梯度乘自己的导数）；Q4 是"用 <code>node_to_grad</code> 字典 + 逆拓扑序把这些 VJP 串起来"（对应 §4.1 的部分伴随累加）。数值梯度检查（§1.1）是你验证对错的工具。<br>
+<em>按 <a href="softmax-loss-derivation.html">no-solution-before-self-attempt</a> 原则：以上只给结构与对应，具体每个 op 的 <code>gradient()</code> 怎么写、拓扑排序怎么实现，留给你自己动手。卡住时先用数值梯度检查定位是哪个算子的 VJP 错了。</em>
+</div>
+
+<h2 id="knowledge-network">9. 与其它章节的联系</h2>
+
+<table>
+<tr><th>方向</th><th>关系</th><th>去向</th></tr>
+<tr>
+  <td><strong>← 前置</strong></td>
+  <td>Lec3 手推 backprop、提出"每层做 VJP"的模块化洞察；本课把它<strong>自动化</strong>成计算图算法。§7 的 $\bar X=\bar Z W^\top$ 就是 Lec3 手推过的线性层梯度</td>
+  <td><a href="backprop-derivation.html">backprop-derivation.html</a>（Lec3, hw0 Q5）</td>
+</tr>
+<tr>
+  <td><strong>→ 实现细节</strong></td>
+  <td>本课讲算法，下一课（Lec5）讲 needle 框架的具体实现（<code>Value</code>/<code>Op</code> 抽象），直接对应 hw1 编码</td>
+  <td>[[lec5-autodiff-impl]]（hw1 编码）</td>
+</tr>
+<tr>
+  <td><strong>→ 框架抽象</strong></td>
+  <td>反向 AD 是整个 needle 框架的内核，后续所有层、优化器都建立在它之上</td>
+  <td>[[lec7-nn-library]]（hw2+）</td>
+</tr>
+</table>
+
+<div class="meaning">
+<strong>知识网络主线</strong>：<code>softmax 回归（Lec2）</code> → <code>manual backprop（Lec3）</code> → <strong><code>autodiff（本文, Lec4）</code></strong> → <code>needle 框架（hw1 编码, Lec5+）</code>。Lec3 是手推的<strong>终点</strong>，本课是自动化的<strong>起点</strong>：把"每层做 VJP"的洞察，用计算图 + 伴随值递推变成通用算法。从此再不用手推梯度。
+</div>
+
+<h2 id="math-knowledge">10. 用到的数学知识点汇总</h2>
+
+<table>
+<tr><th>知识点</th><th>作用</th><th>含义</th></tr>
+<tr><td><strong>导数定义 / 有限差分</strong></td><td>数值微分 + 梯度检查</td><td>中心差分误差 $O(\epsilon^2)$，是验证 AD 的黄金标准</td></tr>
+<tr><td><strong>多元链式法则</strong></td><td>伴随值递推、多路径累加</td><td>反向模式 AD 的数学本质</td></tr>
+<tr><td><strong>计算图 / DAG</strong></td><td>表示计算、按拓扑序遍历</td><td>框架的核心结构，AD 的载体</td></tr>
+<tr><td><strong>伴随值 adjoint</strong> $\bar v_i$</td><td>$\partial y/\partial v_i$，反向递推的量</td><td>一趟反向填满全图 = 一次拿到所有梯度</td></tr>
+<tr><td><strong>部分伴随 partial adjoint</strong></td><td>挂在边上，多路径求和</td><td>直接对应 Q4 的 <code>node_to_grad</code> 列表结构</td></tr>
+<tr><td><strong>拓扑排序</strong></td><td>前向正序、反向逆序</td><td>hw1 Q3；保证遍历某节点时其依赖已就绪</td></tr>
+</table>
+
+<div class="note">
+<strong>一句话总览（讲课主线）</strong>：梯度是 ML 中心问题 → 手推/数值/符号三法各有硬伤 → 计算图为载体 → 前向模式适合"少输入多输出"、不适合深度学习 → <strong>反向模式：从输出端递推伴随值，一趟拿到所有输入梯度</strong> → 多路径要累加（部分伴随）→ <strong>不算数值而是扩展计算图</strong>，白送梯度的梯度 + 可优化 → 张量泛化 → 这就是 needle（hw1）的内核。
+</div>
+
+<h2 id="appendix-a">附录 A：中心差分为什么比单边精确（默认知识）</h2>
+
+<p>讲课一句"二阶项抵消"带过，这里补推。一维泰勒展开：</p>
+<p>$$ f(\theta \pm \epsilon) = f(\theta) \pm \epsilon f'(\theta) + \tfrac{1}{2}\epsilon^2 f''(\theta) \pm \tfrac{1}{6}\epsilon^3 f'''(\theta) + \cdots $$</p>
+<div class="step">
+<ol>
+<li><strong>单边</strong>：$\frac{f(\theta+\epsilon)-f(\theta)}{\epsilon} = f'(\theta) + \tfrac{1}{2}\epsilon f''(\theta) + \cdots$ → 误差 $O(\epsilon)$</li>
+<li><strong>中心</strong>：$f(\theta+\epsilon)-f(\theta-\epsilon)$ 中偶次项（含 $f''$ 的 $\epsilon^2$ 项）符号相同被抵消，只剩奇次项：<br>
+$\frac{f(\theta+\epsilon)-f(\theta-\epsilon)}{2\epsilon} = f'(\theta) + \tfrac{1}{6}\epsilon^2 f'''(\theta) + \cdots$ → 误差 $O(\epsilon^2)$</li>
+</ol>
+</div>
+<div class="meaning">
+<strong>最好理解的角度</strong>：单边差分是"从一侧看斜率"，中心差分是"从两侧对称看斜率"——对称让二阶弯曲的影响正负抵消，所以更准。$\epsilon=10^{-4}$ 时，中心差分误差约 $10^{-8}$，单边约 $10^{-4}$，差 4 个数量级。梯度检查务必用中心差分。
+</div>
+
+<h2 id="appendix-b">附录 B：前向模式 vs 反向模式，何时用哪个（默认知识）</h2>
+
+<p>讲课点到"$n$ 小 $k$ 大用前向、$n$ 大 $k$ 小用反向"，这里给判据。设函数 $f:\mathbb{R}^n\to\mathbb{R}^k$：</p>
+<table>
+<tr><th></th><th>前向模式</th><th>反向模式</th></tr>
+<tr><td>递推方向</td><td>输入 → 输出</td><td>输出 → 输入</td></tr>
+<tr><td>一趟算出</td><td>所有输出对<strong>一个输入</strong>的导数</td><td>所有输入对<strong>一个输出</strong>的导数</td></tr>
+<tr><td>算全 Jacobian</td><td>跑 $n$ 趟</td><td>跑 $k$ 趟</td></tr>
+<tr><td>适合</td><td>$n \ll k$</td><td>$n \gg k$</td></tr>
+</table>
+<div class="meaning">
+<strong>最好理解的角度</strong>：深度学习里损失是标量（$k=1$）、参数上百万（$n$ 巨大），是 $n\gg k$ 的极端情形 → 反向模式一趟搞定，前向模式要跑百万趟。反过来，若要算"一个输入对很多输出的敏感度"（如 $n=1$），前向模式更划算。二者不是谁取代谁，而是看 $n,k$ 谁大。
+</div>
+
+<hr>
+<p style="color:#888;font-size:0.85em">用 VS Code Live Preview 或浏览器打开本文件。MathJax 走 CDN，需 Mac 端联网。CMU 10-714 hw1 · Lecture 4 推导流程配套。</p>
+
+<script>
+// ===== 反向模式 AD 动画（含多路径累加，纯原生 JS + SVG）=====
+(function(){
+  const graph = document.getElementById('ad-graph');
+  const formula = document.getElementById('ad-formula');
+  const status = document.getElementById('ad-status');
+  const btnStep = document.getElementById('ad-step');
+  const btnPlay = document.getElementById('ad-play');
+  const btnReset = document.getElementById('ad-reset');
+  if (!graph) return;
+
+  // 节点布局：v1 分叉到 v2,v3，汇到 v4=y  （多路径示例）
+  // 坐标 (px)，容器 260 高
+  const nodes = [
+    {id:'v1', x:40,  y:104, label:'v₁', desc:'输入 x'},
+    {id:'v2', x:250, y:44,  label:'v₂', desc:'exp(v₁)'},
+    {id:'v3', x:250, y:164, label:'v₃', desc:'v₁+1'},
+    {id:'v4', x:470, y:104, label:'v₄=y', desc:'v₂·v₃'},
+  ];
+  const edges = [ ['v1','v2'], ['v1','v3'], ['v2','v4'], ['v3','v4'] ];
+
+  // 建 DOM
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS,'svg');
+  svg.setAttribute('class','ad-edges');
+  svg.innerHTML = `<defs><marker id="arr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#c4cdd6"></path></marker></defs>`;
+  graph.appendChild(svg);
+  const pos = {}; nodes.forEach(n=>pos[n.id]={x:n.x+26,y:n.y+26});
+  const edgeEls = {};
+  edges.forEach(([a,b])=>{
+    const p = document.createElementNS(NS,'path');
+    const x1=pos[a].x, y1=pos[a].y, x2=pos[b].x-26, y2=pos[b].y;
+    const mx=(x1+x2)/2;
+    p.setAttribute('d',`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    p.setAttribute('class','ad-edge');
+    svg.appendChild(p); edgeEls[a+'-'+b]=p;
+  });
+  const nodeEls = {};
+  nodes.forEach(n=>{
+    const d=document.createElement('div'); d.className='ad-node';
+    d.style.left=n.x+'px'; d.style.top=n.y+'px';
+    d.innerHTML = `${n.label}<span class="nv">${n.desc}</span>`;
+    graph.appendChild(d); nodeEls[n.id]=d;
+  });
+
+  // 步骤：前向 v1→v4，反向 v4→v1（v1 多路径累加）
+  const steps = [
+    {f:()=>lit('v1','fwd'), m:'前向：输入 v₁ 求值', fm:''},
+    {f:()=>{lit('v2','fwd');edge('v1-v2','fwd');}, m:'前向：v₂ = exp(v₁)', fm:''},
+    {f:()=>{lit('v3','fwd');edge('v1-v3','fwd');}, m:'前向：v₃ = v₁ + 1', fm:''},
+    {f:()=>{lit('v4','fwd');edge('v2-v4','fwd');edge('v3-v4','fwd');}, m:'前向：v₄ = v₂·v₃ = y（输出）', fm:''},
+    {f:()=>lit('v4','adj'), m:'反向起点：v̄₄ = ∂y/∂y = 1', fm:'v̄₄ = <span class="lit">1</span>'},
+    {f:()=>{lit('v2','adj');edge('v2-v4','adj');}, m:'反向：v̄₂ = v̄₄ · ∂v₄/∂v₂ = v̄₄·v₃', fm:'v̄₂ = v̄₄ · v₃'},
+    {f:()=>{lit('v3','adj');edge('v3-v4','adj');}, m:'反向：v̄₃ = v̄₄ · ∂v₄/∂v₃ = v̄₄·v₂', fm:'v̄₃ = v̄₄ · v₂'},
+    {f:()=>{lit('v1','multi');edge('v1-v2','adj');edge('v1-v3','adj');},
+     m:'多路径！v₁ 被 v₂、v₃ 同时用 → 两条路径的伴随值相加', cache:true,
+     fm:'v̄₁ = <span class="lit">v̄₂·∂v₂/∂v₁ + v̄₃·∂v₃/∂v₁</span>（两条路径求和）'},
+    {f:()=>{}, m:'完成！一趟反向填满全图，v̄₁ = ∂y/∂x 即所求梯度。', done:true,
+     fm:'反向模式的威力：一次遍历 → 所有输入的梯度'},
+  ];
+
+  function lit(id,cls){ nodeEls[id].classList.remove('fwd','adj','multi'); nodeEls[id].classList.add(cls); }
+  function edge(k,cls){ edgeEls[k].classList.add(cls); }
+
+  let cur=0, timer=null;
+  function apply(s){
+    s.f();
+    status.textContent = s.m;
+    formula.innerHTML = s.fm || '';
+  }
+  function next(){
+    if (cur>=steps.length){ stop(); return; }
+    apply(steps[cur]); cur++;
+    if (cur>=steps.length){ btnStep.disabled=true; stop(); }
+  }
+  function reset(){
+    stop(); cur=0; btnStep.disabled=false;
+    Object.values(nodeEls).forEach(e=>e.className='ad-node');
+    Object.values(edgeEls).forEach(e=>e.setAttribute('class','ad-edge'));
+    formula.innerHTML=''; status.textContent='点"下一步"：先前向求值，再反向传伴随值';
+  }
+  function stop(){ if(timer){clearInterval(timer);timer=null;btnPlay.textContent='自动播放';} }
+  function play(){
+    if(timer){ stop(); return; }
+    if(cur>=steps.length) reset();
+    btnPlay.textContent='暂停';
+    timer=setInterval(()=>{ if(cur>=steps.length) stop(); else next(); },1400);
+  }
+  btnStep.addEventListener('click',next);
+  btnPlay.addEventListener('click',play);
+  btnReset.addEventListener('click',reset);
+})();
+</script>
+
+</body>
+</html>

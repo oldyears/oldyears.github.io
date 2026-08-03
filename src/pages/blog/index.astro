@@ -1,0 +1,38 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import { getCollection } from "astro:content";
+
+const posts = (await getCollection("blog")).sort(
+  (a, b) => b.data.date.valueOf() - a.data.date.valueOf()
+);
+const fmt = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+---
+<BaseLayout title="博客 · oldyears">
+  <h1>博客</h1>
+  <p class="sub">随笔与思考。</p>
+
+  <div class="post-list">
+    {posts.map((post) => (
+      <a href={`/blog/${post.slug}/`} class="card post-item">
+        <div class="post-meta">
+          <time>{fmt(post.data.date)}</time>
+          {post.data.tags.map((t) => <span class="tag">{t}</span>)}
+        </div>
+        <h2>{post.data.title}</h2>
+        {post.data.description && <p class="desc">{post.data.description}</p>}
+      </a>
+    ))}
+  </div>
+
+  <style>
+    .sub { color: var(--text-soft); margin-top: -6px; }
+    .post-list { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; }
+    .post-item { color: var(--text); }
+    .post-item:hover { text-decoration: none; }
+    .post-meta { display: flex; align-items: center; gap: 10px; font-size: .82em; color: var(--text-soft); }
+    .tag { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 1px 9px; }
+    .post-item h2 { margin: 8px 0 4px; font-size: 1.2em; }
+    .desc { color: var(--text-soft); font-size: .92em; margin: 0; }
+  </style>
+</BaseLayout>

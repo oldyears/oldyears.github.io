@@ -1,0 +1,65 @@
+---
+import BaseLayout from "../../layouts/BaseLayout.astro";
+
+// 学习笔记元信息（html 原件在 public/notes/，链接直达，保内部 MathJax/交互）
+const notes = [
+  {
+    file: "softmax-loss-derivation.html",
+    title: "Softmax Loss 与 SGD 梯度推导",
+    course: "CMU 10-714 · Lecture 2 · hw0 Q3/Q4",
+    desc: "按讲课流程推导 softmax loss 与随机梯度下降。含交互式 softmax 概率图、矩阵形状可视化。",
+    tags: ["softmax", "gradient", "交互"],
+  },
+  {
+    file: "backprop-derivation.html",
+    title: "反向传播（Backpropagation）推导",
+    course: "CMU 10-714 · Lecture 3 · hw0 Q5",
+    desc: "两层网络反向传播逐步推导，推广到 L 层。含前向/反向传播动画、G₁ 形状可视化。",
+    tags: ["backprop", "chain rule", "动画"],
+  },
+  {
+    file: "autodiff-derivation.html",
+    title: "自动微分（Automatic Differentiation）",
+    course: "CMU 10-714 · Lecture 4 · hw1",
+    desc: "为什么现代框架用反向模式 AD + 扩展计算图。含反向模式 AD 动画（多路径伴随值累加）。",
+    tags: ["autodiff", "计算图", "动画"],
+  },
+];
+---
+<BaseLayout title="学习笔记 · oldyears" description="CMU 10-714 深度学习系统学习笔记，含公式推导与交互可视化">
+  <h1>学习笔记</h1>
+  <p class="sub">
+    CMU 10-714 深度学习系统 · 跟着课程推导，配可交互的可视化。每篇标注来源与对应作业，
+    只讲思路不给作业答案。
+  </p>
+
+  <div class="note-list">
+    {notes.map((n) => (
+      <a href={`/notes/${n.file}`} class="card note-item">
+        <div class="note-course">{n.course}</div>
+        <h2>{n.title}</h2>
+        <p class="note-desc">{n.desc}</p>
+        <div class="note-tags">
+          {n.tags.map((t) => <span class="tag">{t}</span>)}
+        </div>
+      </a>
+    ))}
+  </div>
+
+  <p class="foot-note">
+    💡 笔记为独立 HTML，公式用 MathJax 渲染、交互用原生 JS，点击卡片在新页面打开。
+  </p>
+
+  <style>
+    .sub { color: var(--text-soft); margin-top: -6px; max-width: 640px; }
+    .note-list { display: flex; flex-direction: column; gap: 16px; margin-top: 24px; }
+    .note-item { color: var(--text); display: flex; flex-direction: column; gap: 6px; }
+    .note-item:hover { text-decoration: none; }
+    .note-course { font-size: .8em; color: var(--accent); font-weight: 600; }
+    .note-item h2 { margin: 2px 0; font-size: 1.2em; }
+    .note-desc { color: var(--text-soft); font-size: .92em; margin: 0 0 4px; }
+    .note-tags { display: flex; gap: 8px; flex-wrap: wrap; }
+    .tag { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 10px; padding: 1px 9px; font-size: .78em; color: var(--text-soft); }
+    .foot-note { margin-top: 28px; color: var(--text-soft); font-size: .85em; }
+  </style>
+</BaseLayout>

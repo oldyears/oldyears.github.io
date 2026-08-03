@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>Softmax Loss 公式推导 — CMU 10-714 hw0</title>
+<script>
+  MathJax = {
+    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+    chtml: { scale: 1.05 }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 820px; margin: 40px auto; line-height: 1.75; padding: 0 24px;
+         color: #1f2328; }
+  h1 { font-size: 1.5em; border-bottom: 2px solid #4a90d9; padding-bottom: 8px; }
+  h2 { font-size: 1.2em; color: #2b5b8c; margin-top: 2.2em; border-left: 4px solid #4a90d9; padding-left: 10px; }
+  h3 { font-size: 1.05em; color: #444; margin-top: 1.6em; }
+  code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.92em; color: #c7254e; }
+  .note { background: #eef6ff; border-left: 4px solid #4a90d9; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .meaning { background: #f0fdf4; border-left: 4px solid #22a06b; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .warn { background: #fff8e6; border-left: 4px solid #d97706; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.93em; }
+  th, td { border: 1px solid #d0d7de; padding: 8px 10px; text-align: left; }
+  th { background: #f6f8fa; }
+  .step { counter-reset: step; }
+  .step ol { padding-left: 28px; }
+  .step ol > li { margin: 6px 0; }
+  .tag { display:inline-block; background:#4a90d9; color:#fff; font-size:0.75em; padding:1px 8px; border-radius:10px; margin-right:6px; }
+  /* ===== 交互组件通用 ===== */
+  .interactive { background:#fafcff; border:1px solid #cfe0f2; border-radius:8px; padding:18px 22px 16px; margin:24px 0; }
+  .interactive .title { font-weight:600; color:#2b5b8c; margin-bottom:14px; font-size:0.95em; }
+  .interactive .hint { color:#888; font-size:0.82em; margin-top:14px; line-height:1.65; }
+  /* ----- softmax 条形图 ----- */
+  .sm-legend { font-size:0.8em; color:#666; margin-bottom:16px; }
+  .sm-legend span { display:inline-block; width:11px; height:11px; border-radius:2px; vertical-align:middle; margin:0 5px 0 16px; }
+  .sm-wrap { display:flex; align-items:center; gap:28px; flex-wrap:wrap; }
+  .sm-cols { display:flex; align-items:flex-end; gap:22px; }
+  .sm-col { display:flex; flex-direction:column; align-items:center; width:58px; }
+  .sm-plot { height:120px; display:flex; align-items:flex-end; justify-content:center; gap:6px; overflow:hidden; }
+  .sm-bar { width:20px; border-radius:3px 3px 0 0; transition:height .1s ease; }
+  .sm-logit { background:#9db8d6; }
+  .sm-prob  { background:#22a06b; }
+  .sm-slider { width:58px; margin:12px 0 5px; }
+  .sm-val { font-size:0.7em; color:#555; font-variant-numeric:tabular-nums; text-align:center; line-height:1.35; white-space:pre; }
+  .sm-lbl { font-size:0.78em; color:#333; margin-top:4px; }
+  .sm-sum-box { font-size:0.85em; color:#555; line-height:1.6; }
+  /* ----- 矩阵形状图 ----- */
+  .mat-viz { display:flex; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap; margin:10px 0 4px; padding:10px 0; }
+  .mat-box { display:inline-flex; flex-direction:column; align-items:center; gap:6px; }
+  .mat-rect { border:2px solid #4a90d9; background:#eaf2fb; display:flex; align-items:center; justify-content:center;
+              color:#2b5b8c; font-size:0.9em; border-radius:4px; }
+  .mat-rect.res { border-color:#22a06b; background:#eafaf1; color:#1a7a4f; }
+  .mat-dim { font-size:0.74em; color:#666; }
+  .mat-op { font-size:1.5em; color:#999; padding:0 4px; }
+  .mat-note { text-align:center; font-size:0.82em; color:#888; margin-top:12px; line-height:1.65; }
+  .toggle-btn { background:#4a90d9; color:#fff; border:none; border-radius:5px; padding:6px 14px; font-size:0.82em; cursor:pointer; }
+  .toggle-btn:hover { background:#3b7bc0; }
+</style>
+</head>
+<body>
+
+<h1>Softmax Loss 公式推导详解</h1>
+<p style="color:#666">CMU 10-714 Deep Learning Systems · Homework 0 · Question 3 & 4 · 按 Lecture 2（ML Refresher / Softmax Regression, Kolter）推导流程整理</p>
+
+<div class="note">
+<strong>这份文档按讲课的推导顺序回答两个问题：</strong><br>
+① 作业里的 $\ell_{\mathrm{softmax}}(z, y) = \log\sum_{i=1}^k \exp z_i - z_y$ 是怎么来的？<br>
+② 梯度 $\nabla_\Theta \ell = x(z - e_y)^T$（单样本）和 $\frac{1}{m}X^T(Z - I_y)$（批量）是怎么一步步推出来的？<br>
+<em>讲课不走信息论，而是走"造概率 → 负对数似然 → 标量作弊法求梯度"的工程路线。信息论视角作为附录 A 保留。</em>
+</div>
+
+<div class="warn">
+<strong>来源说明</strong>：主线内容整理自 <strong>Lecture 2（ML Refresher / Softmax Regression, Kolter）</strong> 的 YouTube 字幕（<code>MlivXhZFbNA</code>），标注"讲课"处均出自该字幕。附录 A 的信息论视角为补充内容，<strong>非讲课原话</strong>。本文只讲推导与思路，不含作业代码实现。
+</div>
+
+<h2 id="framework">0. 机器学习三要素（讲课的组织框架）</h2>
+
+<p>Kolter 一开场就立了一个坐标系：<strong>任何监督学习算法 = 3 个部件</strong>，softmax 回归只是把这三块具体化，作业 Q3/Q4 就是在实现它们。</p>
+
+<table>
+<tr><th>部件</th><th>回答的问题</th><th>softmax 回归的选择</th></tr>
+<tr><td><strong>① 假设类</strong> hypothesis</td><td>模型长什么样？</td><td>线性 $h_\theta(x)=\Theta^\top x$</td></tr>
+<tr><td><strong>② 损失函数</strong> loss</td><td>怎么衡量预测好坏？</td><td>cross-entropy / softmax loss</td></tr>
+<tr><td><strong>③ 优化方法</strong> optimization</td><td>怎么找到好参数？</td><td>随机梯度下降 SGD</td></tr>
+</table>
+
+<p>核心优化问题（贯穿全部机器学习）：找参数 $\Theta$ 使训练集上的平均损失最小</p>
+<p>$$ \operatorname*{minimize}_{\Theta} \; \frac{1}{m}\sum_{i=1}^m \ell\big(h_\theta(x^{(i)}), y^{(i)}\big) $$</p>
+
+<div class="meaning">
+<strong>为什么先立框架</strong>：Kolter 强调"其实没有几千种机器学习算法，本质只有一种"——都是在填这三个空。看懂 softmax 回归怎么填，后面换成神经网络（Lecture 3）只是换了①假设类，②③几乎不变。
+</div>
+
+<h2 id="setup">1. 假设函数：从单样本到批量 $X\Theta$</h2>
+
+<p>多分类设定：输入 $x \in \mathbb{R}^n$（MNIST 图像展平成 784 维），标签 $y\in\{1,\dots,k\}$（10 类），训练集 $m$ 个样本。</p>
+
+<p><strong>线性假设</strong>：模型输出 $k$ 个分数（每类一个），用参数矩阵 $\Theta \in \mathbb{R}^{n \times k}$：</p>
+<p>$$ h_\theta(x) = \Theta^\top x \in \mathbb{R}^k $$</p>
+<p>维度自检：$\Theta^\top$ 是 $k\times n$，乘 $n\times 1$ 得 $k\times 1$ ✓。输出的这 $k$ 个数叫 <strong>logits</strong>，是任意实数，<em>还不是</em>概率。</p>
+
+<h3>1.1 批量形式（讲课特别强调）</h3>
+
+<p>训练不逐样本算。把 $m$ 个样本按行堆成<strong>设计矩阵</strong> $X\in\mathbb{R}^{m\times n}$（第 $i$ 行是 $x^{(i)\top}$）。则整批假设：</p>
+<div class="step">
+<ol>
+<li>逐行看：$h_\theta(X)$ 第 $i$ 行 $= \big(\Theta^\top x^{(i)}\big)^\top = x^{(i)\top}\Theta$</li>
+<li>把所有行叠起来，正是矩阵乘法：<br>
+$$ h_\theta(X) = X\Theta \in \mathbb{R}^{m\times k} $$</li>
+</ol>
+</div>
+
+<div class="meaning">
+<strong>为什么反复强调批量</strong>：Kolter 说这不只是记号漂亮——矩阵运算比逐向量循环快得多（BLAS/GPU 都为矩阵乘法优化）。写成 $X\Theta$ 而不是 for 循环，是能在真实硬件上跑得快的关键。作业要求"不许用循环"就是这个原因。
+</div>
+
+<h2 id="loss-motivation">2. 损失函数：为什么不能用最直观的 0/1 error</h2>
+
+<p>最直观的分类损失是 <strong>0/1 error（错误率）</strong>：预测对了记 0，错了记 1：</p>
+<p>$$ \ell_{\mathrm{err}}(h(x), y) = \begin{cases} 0 & \arg\max_i h_i(x) = y \\ 1 & \text{否则} \end{cases} $$</p>
+
+<p>它非常适合<strong>评估</strong>分类器（准确率 = 1 − 平均 error），但用来<strong>优化</strong>极差：</p>
+<ul>
+<li><strong>不可微</strong>：参数微小变化时 error 通常不变（不在切换点），一变就是 0↔1 跳变，没有梯度可用。</li>
+<li><strong>NP-hard</strong>：即便线性分类器，找最小 error 的参数也是 NP-hard。</li>
+</ul>
+
+<div class="note">
+<strong>关键动机</strong>：深度学习几乎全靠<strong>基于梯度</strong>的优化。所以我们需要一个<strong>可微、且能提供梯度信号</strong>的替代损失——这就引出 softmax / cross-entropy loss。
+</div>
+
+<h2 id="softmax">3. 造一个概率：exp 保正 + normalize 归一</h2>
+
+<p>要把 logits $h_i$ 变成概率。Kolter 的推导很直接——概率的两个硬性要求，逐个满足：</p>
+
+<div class="step">
+<ol>
+<li><strong>要求非负</strong>：logits 可正可负 → 取指数 $\exp(h_i)$，任何实数指数后都为正。✓ 第一个要求</li>
+<li><strong>要求和为 1</strong>：exp 之后不保证求和为 1 → 除以总和归一化：<br>
+$$ z_i = p(\text{label}=i) = \frac{\exp h_i}{\sum_{j=1}^{k}\exp h_j} $$</li>
+</ol>
+</div>
+
+<p>向量记法：$z = \mathrm{normalize}(\exp(h)) = \operatorname{softmax}(h)$。这就是作业里的 $\mathrm{normalize}(\exp(\Theta^\top x))$。</p>
+
+<div class="meaning">
+<strong>数据处理含义</strong>：exp 保证非负并放大差距（logit 大的类别概率更陡峭地占优），normalize 保证输出是合法概率分布。注意 Kolter 反复提醒：softmax <strong>不属于假设类</strong>，假设的输出就是线性 logits，softmax 是"埋进损失里"的操作（见 §4 末的数值说明）。
+</div>
+
+<div class="interactive" id="sm-demo">
+  <div class="title">🎚 交互：拖动 logits，看 softmax 概率如何变化</div>
+  <div class="sm-legend">
+    <span style="background:#9db8d6"></span>logit $h_i$（可正可负，蓝）
+    <span style="background:#22a06b"></span>概率 $z_i$（exp 后归一，绿）
+  </div>
+  <div class="sm-wrap">
+    <div class="sm-cols" id="sm-cols"></div>
+    <div class="sm-sum-box">
+      $\sum_i z_i = $ <b id="sm-sum">1.00</b><br>
+      <span style="color:#888">概率恒为正、和恒为 1</span>
+    </div>
+  </div>
+  <div class="hint">观察：拉大某个 logit，它的概率会<strong>陡峭地</strong>吃掉其它类的概率（exp 放大差距）；把所有 logit 设成相等 → 均匀分布。</div>
+</div>
+
+<h2 id="loss-form">4. 负对数似然 → 作业的损失公式</h2>
+
+<p>有了概率 $z_i$，怎么衡量好坏？很直观：<strong>让真实类别 $y$ 的概率尽量大</strong>。但损失约定要"最小化"，且直接优化概率数值条件差 → 取<strong>负对数</strong>（negative log likelihood）：</p>
+
+<div class="step">
+<ol>
+<li>$\ell = -\log p(\text{label}=y) = -\log \dfrac{\exp h_y}{\sum_j \exp h_j}$</li>
+<li>对数性质 $\log\frac{A}{B}=\log A-\log B$：<br>
+$\ell = -\log\exp h_y + \log\sum_j \exp h_j$</li>
+<li>$\log\exp h_y = h_y$，得最终形式（用 $z$ 代表 logits，对上作业记号）：<br>
+$$\boxed{\;\ell_{\mathrm{softmax}}(z, y) = \log \sum_{i=1}^{k} \exp z_i \;-\; z_y\;}$$</li>
+</ol>
+</div>
+
+<p>这就是 notebook Q3 的公式。它有几个名字：cross-entropy loss（现在最常用）、softmax loss、multi-class logistic loss，都是同一个东西。</p>
+
+<div class="warn">
+<strong>为什么不先算 softmax 再取 log</strong>（Kolter 强调的实现要点）：应把 cross-entropy <strong>整体作用在 logits 上</strong>，而不是先显式算出 softmax 概率再取 log。原因：(1) 若某概率数值下溢到 0，$\log 0$ 会爆；(2) 直接对 logits 操作在凸性和数值上都更好。实用中还有 <strong>log-sum-exp trick</strong>：算 $\log\sum\exp z_i$ 前先减去 $\max_i z_i$ 防溢出。作业说"不用管数值稳定性"，可直接按公式写。
+</div>
+
+<h2 id="optimization">5. 优化：梯度 → 梯度下降 → SGD</h2>
+
+<p>找参数用<strong>梯度下降</strong>。先讲三个概念，再落到作业的 epoch 循环。</p>
+
+<h3>5.1 梯度是什么</h3>
+<p>对矩阵输入、标量输出的函数 $f(\Theta)$（这里 $f$ 就是要最小化的平均损失），梯度 $\nabla_\Theta f$ 是一个与 $\Theta$ 同形状（$n\times k$）的<strong>偏导数矩阵</strong>，第 $(l,j)$ 元是 $\partial f/\partial\Theta_{lj}$。它<strong>指向 $f$ 局部增长最快的方向</strong>。</p>
+
+<h3>5.2 梯度下降</h3>
+<p>要最小化 $f$，就沿梯度<strong>反方向</strong>走一小步：</p>
+<p>$$ \Theta := \Theta - \alpha\,\nabla_\Theta f $$</p>
+<p>$\alpha$ 是学习率 / 步长。Kolter 说"这一行数学撑起了几乎全部深度学习"。步长太小收敛慢，太大会来回震荡甚至发散。</p>
+
+<h3>5.3 随机梯度下降 SGD（为什么必须用）</h3>
+<p>全量梯度 $\nabla_\Theta f = \frac{1}{m}\sum_{i=1}^m \nabla_\Theta \ell^{(i)}$ 要遍历<strong>所有 $m$ 个样本</strong>才走一步：</p>
+<ul>
+<li>数据越多，每步越慢（极端情况下无限数据永远走不动一步）；</li>
+<li>深度学习里全量数据 + 中间量根本放不进内存。</li>
+</ul>
+<p>解法：把数据切成大小 $B$ 的 <strong>minibatch</strong>，每个 batch 算一次<strong>近似梯度</strong>就更新一步。噪声近似换来快得多的迭代（有时噪声还有正则作用）。这就是作业 Q4 <code>softmax_regression_epoch(X, y, Θ, lr, batch)</code> 的循环结构。</p>
+
+<h2 id="grad-single">6. 求梯度（核心推导，分两步 + 标量作弊法）</h2>
+
+<p>目标：求 $\nabla_\Theta \ell$，其中 $\ell = \log\sum_i \exp z_i - z_y$，$z = \Theta^\top x$。Kolter 分两步：先对 logits 求（干净），再链式到 $\Theta$（用"标量作弊法"）。</p>
+
+<h3>6.1 第一步：$\ell$ 对 logits $z$ 的梯度（逐元素，干净推导）</h3>
+
+<p><strong>第一项</strong> $\log\sum_i \exp z_i$：令 $S=\sum_i\exp z_i$，</p>
+<p>$$ \frac{\partial}{\partial z_i}\log S = \frac{1}{S}\cdot\frac{\partial S}{\partial z_i} = \frac{1}{S}\cdot\exp z_i = \frac{\exp z_i}{\sum_j\exp z_j} = z_i^{\text{prob}} $$</p>
+<p>结果正是 softmax 概率本身。</p>
+
+<p><strong>第二项</strong> $-z_y$：对 $z_i$ 的偏导是 $-\mathbf{1}\{i=y\} = -(e_y)_i$（只有 $i=y$ 时为 $-1$，否则 0）。</p>
+
+<p>两项相加，写成向量形式：</p>
+<p>$$ \nabla_z \ell = z^{\text{prob}} - e_y \quad\Longleftrightarrow\quad \nabla_z\ell = z - e_y \;(\text{作业记号，}z\text{ 指概率}) $$</p>
+
+<div class="meaning">
+<strong>数据处理含义</strong>：这个结果极其优雅——<strong>softmax 损失对 logits 的梯度 = 预测概率 − 真实 one-hot</strong>。预测对了（概率 $\to e_y$）梯度趋零、停止学习；错得越离谱梯度越大、纠正越猛。这是深度学习分类里最核心的梯度，$-\log$ 的非线性恰好换来这个简洁形式。
+</div>
+
+<h3>6.2 第二步：链式到 $\Theta$ —— "标量作弊法"（讲课的大揭秘）</h3>
+
+<p>现在要从 $\nabla_z\ell$ 传到 $\nabla_\Theta\ell$。严格做法（Jacobian + Kronecker 积 + 向量化的矩阵微分）非常繁琐。Kolter 坦言实践中人人都用一个"上不了台面但有效"的技巧：</p>
+
+<div class="warn">
+<strong>标量作弊法（scalar cheating）</strong>：<em>先把所有量都当标量，套普通链式法则；再按目标形状转置 / 重排，凑出维度正确的结果。</em>算完<strong>务必数值验证</strong>（作业 hw2 会做梯度数值检查）。
+</div>
+
+<p>按此法：</p>
+<div class="step">
+<ol>
+<li>假装标量，链式：$\dfrac{\partial\ell}{\partial\Theta} = \dfrac{\partial\ell}{\partial(\Theta^\top x)}\cdot\dfrac{\partial(\Theta^\top x)}{\partial\Theta}$</li>
+<li>第一项 = $z - e_y$（第一步的结果，$k\times 1$）；第二项"标量下"$= x$（$n\times 1$）</li>
+<li>凑形状：目标 $\nabla_\Theta$ 要 $n\times k$。手上有 $x$（$n\times1$）和 $z-e_y$（$k\times1$）。唯一凑法是外积：<br>
+$$\boxed{\;\nabla_\Theta\,\ell_{\mathrm{softmax}}(\Theta^\top x, y) = x\,(z - e_y)^T\;}$$</li>
+</ol>
+</div>
+
+<div class="note">
+<strong>矩阵形状自检</strong>（Kolter 强调必做，尤其别把 $n=k$ 撞一起）：<br>
+$x \in \mathbb{R}^{n\times 1}$，$(z-e_y)^T \in \mathbb{R}^{1\times k}$，外积 $\in \mathbb{R}^{n\times k}$ = $\Theta$ 的形状。✓
+</div>
+
+<h2 id="grad-batch">7. 批量梯度：Q4 直接用的公式</h2>
+
+<p>同样用标量作弊法处理整批 $X\Theta$。定义：</p>
+<ul>
+<li>$Z = \mathrm{normalize}(\exp(X\Theta)) \in \mathbb{R}^{m \times k}$（逐行 softmax，第 $i$ 行是第 $i$ 样本的预测概率）</li>
+<li>$I_y \in \mathbb{R}^{m \times k}$：标签的 one-hot 矩阵（第 $i$ 行是 $e_{y^{(i)}}$）</li>
+</ul>
+
+<p>把单样本外积 $x^{(i)}(z^{(i)}-e_{y^{(i)}})^T$ 对 $m$ 个样本求和，重写成矩阵乘法：</p>
+<p>$$ \sum_{i=1}^m x^{(i)}(z^{(i)} - e_{y^{(i)}})^T = X^T (Z - I_y) $$</p>
+
+<p>形状凑法：$Z-I_y$ 是 $m\times k$，$X$ 是 $m\times n$，要 $n\times k$ 输出必须转置 $X$ → $X^T(Z-I_y)$。除以 $m$ 取平均：</p>
+<p>$$ \boxed{\;\nabla_\Theta\,\ell_{\mathrm{softmax}}(X\Theta, y) = \frac{1}{m}\, X^T\,(Z - I_y)\;} $$</p>
+
+<div class="meaning">
+<strong>数据处理含义</strong>：整批梯度压缩成一次矩阵乘法——这就是<strong>向量化</strong>的全部意义，把 $m$ 次循环交给 BLAS/numpy 一次算完。SGD 每个 minibatch 就用它更新 $\Theta \leftarrow \Theta - \mathrm{lr}\cdot\nabla_\Theta\ell$。所有繁琐推导，最后落成 <strong>五六行 Python</strong>（Kolter 语），MNIST 上能到约 8% 错误率。
+</div>
+
+<div class="interactive">
+  <div class="title">📐 矩阵形状可视化：$X^\top(Z - I_y)$ 为什么得到 $n\times k$</div>
+  <div class="mat-viz">
+    <div class="mat-box">
+      <div class="mat-rect" style="width:96px;height:64px">$X^\top$</div>
+      <div class="mat-dim">$n \times \color{#d97706}{m}$</div>
+    </div>
+    <div class="mat-op">·</div>
+    <div class="mat-box">
+      <div class="mat-rect" style="width:64px;height:96px">$Z - I_y$</div>
+      <div class="mat-dim">$\color{#d97706}{m} \times k$</div>
+    </div>
+    <div class="mat-op">=</div>
+    <div class="mat-box">
+      <div class="mat-rect res" style="width:64px;height:64px">$\nabla_\Theta$</div>
+      <div class="mat-dim">$n \times k$</div>
+    </div>
+  </div>
+  <div class="mat-note">中间维度 <span style="color:#d97706;font-weight:600">$m$</span>（橙色）相消 → 只剩外侧 $n \times k$，正好是 $\Theta$ 的形状。<br>
+  这就是"为什么必须转置 $X$"：不转的话 $X$ 是 $m\times n$，中间对不上，乘不了。</div>
+  <div style="text-align:center;margin-top:14px">
+    <button class="toggle-btn" onclick="toggleSingle()">切换：单样本 $x(z-e_y)^\top$ ↔ 批量</button>
+  </div>
+  <div class="mat-viz" id="mat-single" style="display:none">
+    <div class="mat-box">
+      <div class="mat-rect" style="width:44px;height:96px">$x$</div>
+      <div class="mat-dim">$n \times \color{#d97706}{1}$</div>
+    </div>
+    <div class="mat-op">·</div>
+    <div class="mat-box">
+      <div class="mat-rect" style="width:96px;height:44px">$(z-e_y)^\top$</div>
+      <div class="mat-dim">$\color{#d97706}{1} \times k$</div>
+    </div>
+    <div class="mat-op">=</div>
+    <div class="mat-box">
+      <div class="mat-rect res" style="width:64px;height:64px">$\nabla_\Theta$</div>
+      <div class="mat-dim">$n \times k$</div>
+    </div>
+  </div>
+  <div class="hint">单样本的外积（$n\times1$ 乘 $1\times k$）和批量（$n\times m$ 乘 $m\times k$）是同一件事——批量只是把 $m$ 个外积一次算完，中间维度从 1 变成 m。</div>
+</div>
+
+<h2 id="math-knowledge">8. 用到的数学知识点汇总 + 数据处理含义</h2>
+
+<table>
+<tr><th>知识点</th><th>在这里的作用</th><th>数据处理中的含义</th></tr>
+<tr>
+  <td><strong>机器学习三要素</strong></td>
+  <td>假设 / 损失 / 优化</td>
+  <td>任何监督算法的统一框架；softmax 回归、神经网络只是换填其中的部件</td>
+</tr>
+<tr>
+  <td><strong>0/1 error 为何不可优化</strong></td>
+  <td>引出可微损失的动机</td>
+  <td>error 适合评估但不可微、NP-hard；深度学习靠梯度，必须换成 cross-entropy</td>
+</tr>
+<tr>
+  <td><strong>Softmax 函数</strong><br>exp 保正 + normalize 归一</td>
+  <td>logits → 概率 $z^{\text{prob}}$</td>
+  <td>把任意实数分数转成合法概率分布（和为 1），是分类模型的标准输出</td>
+</tr>
+<tr>
+  <td><strong>负对数似然</strong><br>$-\log p(y)$</td>
+  <td>定义 cross-entropy loss</td>
+  <td>让真实类别概率最大，取负 log 转成可最小化、数值条件好的损失</td>
+</tr>
+<tr>
+  <td><strong>One-hot 编码</strong> $e_y$ / $I_y$</td>
+  <td>把类别标签变成向量/矩阵</td>
+  <td>让离散标签参与向量矩阵运算（算 $z-e_y$、$Z-I_y$ 必须先把 $y$ 变 one-hot）</td>
+</tr>
+<tr>
+  <td><strong>对数性质</strong><br>$\log(A/B)=\log A - \log B$</td>
+  <td>把 $-\log\hat{y}_y$ 拆成 log-sum-exp 减 $z_y$</td>
+  <td>把"除法+log"转成"加法+log"，避免数值不稳定，也方便求导（$\log\exp z = z$ 消掉）</td>
+</tr>
+<tr>
+  <td><strong>梯度 & 梯度下降</strong></td>
+  <td>$\Theta:=\Theta-\alpha\nabla_\Theta f$</td>
+  <td>梯度指向增长最快方向，反向走一步即下降；撑起几乎全部深度学习优化</td>
+</tr>
+<tr>
+  <td><strong>SGD / minibatch</strong></td>
+  <td>每个 batch 近似梯度更新一次</td>
+  <td>全量梯度慢且爆内存；minibatch 用噪声近似换快迭代，是实际训练的标配</td>
+</tr>
+<tr>
+  <td><strong>标量作弊法</strong><br>假装标量+转置对齐</td>
+  <td>从 $\nabla_z\ell$ 链式到 $\nabla_\Theta\ell$</td>
+  <td>绕开繁琐的矩阵微分，实践中人人用；务必数值验证（hw2 会做）</td>
+</tr>
+<tr>
+  <td><strong>链式法则（多元）</strong></td>
+  <td>$\nabla_\Theta\ell = \nabla_z\ell \cdot \frac{\partial z}{\partial\Theta}$</td>
+  <td>反向传播的本质；所有框架的自动微分都建立在它之上</td>
+</tr>
+<tr>
+  <td><strong>向量/矩阵微积分</strong><br>外积、转置</td>
+  <td>$x(z-e_y)^T$、$X^T(Z-I_y)$</td>
+  <td>把逐元素梯度写成矩阵表达式 → 能用 BLAS 一次算完整批（向量化提速）</td>
+</tr>
+<tr>
+  <td><strong>Log-sum-exp trick</strong></td>
+  <td>稳定计算 $\log\sum\exp z_i$</td>
+  <td>防 $\exp$ 溢出（减去最大值），softmax 实现必备；hw0 不要求但真实代码必须</td>
+</tr>
+</table>
+
+<h2 id="code-map">9. 和作业代码的对应关系</h2>
+
+<table>
+<tr><th>公式符号</th><th>代码里的量</th><th>形状</th></tr>
+<tr><td>$X$</td><td>minibatch 输入</td><td><code>(batch, n)</code></td></tr>
+<tr><td>$\Theta$</td><td><code>theta</code>（被原地修改）</td><td><code>(n, k)</code></td></tr>
+<tr><td>$X\Theta$</td><td>logits</td><td><code>(batch, k)</code></td></tr>
+<tr><td>$Z = \mathrm{normalize}(\exp(X\Theta))$</td><td>逐行 softmax</td><td><code>(batch, k)</code></td></tr>
+<tr><td>$I_y$</td><td>标签的 one-hot 矩阵</td><td><code>(batch, k)</code></td></tr>
+<tr><td>$\frac{1}{m}X^T(Z - I_y)$</td><td>梯度 <code>grad</code></td><td><code>(n, k)</code></td></tr>
+<tr><td>$\Theta \leftarrow \Theta - \mathrm{lr}\cdot\mathrm{grad}$</td><td>SGD 参数更新</td><td>原地</td></tr>
+</table>
+
+<p><code>softmax_loss</code>（Q3）实现的是 $\ell = \mathrm{mean}(\log\mathrm{sumexp}(z) - z_{y})$；<code>softmax_regression_epoch</code>（Q4）用上面的批量梯度公式跑一遍数据。两者是"前向算损失"和"反向算梯度"的同一套数学。</p>
+
+<div class="note">
+<strong>一句话总览（讲课主线）</strong>：三要素框架 → 0/1 error 不可微，需换损失 → exp 保正 + normalize 归一造概率 → 负对数似然得 $\log\sum\exp z_i - z_y$ → 对 logits 求导得优雅的 $z-e_y$ → 标量作弊法链式 + 转置对齐得 $x(z-e_y)^T$ → 批量求和转矩阵得 $\frac{1}{m}X^T(Z-I_y)$ → SGD 更新。整条链就是 softmax 回归的全部数学。
+</div>
+
+<h2 id="knowledge-network">10. 与其它章节的联系</h2>
+
+<p>softmax 回归是整门课的<strong>起点样板</strong>——它把"假设 / 损失 / 优化"三要素填了一遍最简单的版本。后面每一课基本都是在替换或深化其中某一块：</p>
+
+<table>
+<tr><th>方向</th><th>关系</th><th>去向</th></tr>
+<tr>
+  <td><strong>← 前置</strong></td>
+  <td>本文 §6.2 的"标量作弊法"手动求梯度，是<strong>链式法则</strong>在矩阵上的直接应用；交叉熵的信息论根源见本文附录 A</td>
+  <td>附录 A（本文）</td>
+</tr>
+<tr>
+  <td><strong>→ 换假设类</strong></td>
+  <td>三要素里<strong>只把①线性假设换成两层网络</strong> $W_2^\top\mathrm{ReLU}(W_1^\top x)$，②cross-entropy 损失、③SGD 完全不变。梯度推导从"一步链式"变成"逐层链式"（反向传播）</td>
+  <td>[[lec3-manual-backprop]]（对应 hw0 Q5）</td>
+</tr>
+<tr>
+  <td><strong>→ 自动化梯度</strong></td>
+  <td>本文 §6.2 吐槽的"手动标量作弊法很丢人"，正是<strong>自动微分</strong>要解决的问题——让程序自动算 $\nabla_z\ell=z-e_y$ 这类局部梯度并串起来</td>
+  <td>[[lec4-autodiff]]（对应 hw1）</td>
+</tr>
+<tr>
+  <td><strong>→ 优化深化</strong></td>
+  <td>本文 §5.3 的 SGD 是最朴素版；步长敏感、震荡等问题由 momentum / Adam 缓解</td>
+  <td>[[lec6-optimization]]</td>
+</tr>
+</table>
+
+<div class="meaning">
+<strong>知识网络主线</strong>：<code>softmax 回归（本文）</code> → <code>manual backprop（Q5）</code> → <code>autodiff（hw1）</code> → <code>NN library（hw2+）</code>。核心不变量是"三要素框架"和"链式法则求梯度"，变化的只是假设类越来越复杂、梯度计算从手推走向自动化。
+</div>
+
+<h2 id="appendix-info">附录 A：交叉熵的信息论视角（讲课未展开，补充）</h2>
+
+<p>Lecture 2 走的是"造概率 + 负对数似然"的工程路线，没讲信息论。但 cross-entropy 这个名字来自信息论，理解这条链能看清"为什么用交叉熵当损失"的深层合理性。</p>
+
+<h3>A.1 自信息：一个事件携带多少信息</h3>
+<p>越不可能的事发生越"意外"，信息量与概率成反比：$I(x) = -\log p(x)$。必然事件 $p=1$ 时 $I=0$；取对数让独立事件信息可加。</p>
+
+<h3>A.2 熵：分布的平均信息量</h3>
+<p>$$ H(p) = -\sum_{i=1}^{k} p_i \log p_i $$</p>
+<p>衡量分布的不确定性：one-hot 熵为 0，均匀分布熵最大。只取决于真实分布 $p$。</p>
+
+<h3>A.3 交叉熵：用"错的分布"编码的平均长度</h3>
+<p>真实分布 $p$、但用 $q$ 的最优编码（码长 $-\log q_i$）表示，按 $p$ 取期望：</p>
+<p>$$ H(p, q) = -\sum_{i=1}^{k} p_i \log q_i $$</p>
+
+<h3>A.4 KL 散度：交叉熵与熵的关系</h3>
+<div class="step">
+<ol>
+<li>$D_{\mathrm{KL}}(p\|q) = \sum_i p_i \log\frac{p_i}{q_i} = \sum_i p_i \log p_i - \sum_i p_i \log q_i$</li>
+<li>$= -H(p) + H(p,q)$</li>
+<li>移项：$$\boxed{\;H(p,q) = H(p) + D_{\mathrm{KL}}(p\|q)\;}$$</li>
+</ol>
+</div>
+<p>真实分布 $p$ 固定 → $H(p)$ 是常数 → 最小化交叉熵 $\equiv$ 最小化 KL $\equiv$ 让预测逼近真实分布。这就是交叉熵当损失的合理性。</p>
+
+<h3>A.5 代入 one-hot：与讲课的 $-\log\hat{y}_y$ 汇合</h3>
+<p>分类里 $p = e_y$（one-hot），$q = \hat{y}$（softmax 输出）。代入交叉熵，求和只剩 $i=y$ 项：</p>
+<p>$$ H(e_y, \hat{y}) = -\sum_i (e_y)_i \log\hat{y}_i = -\log\hat{y}_y $$</p>
+<p>这正是 §4 讲课用"负对数似然"直接得到的同一个损失。<strong>两条路殊途同归</strong>：讲课的工程路线（造概率→负 log）和信息论路线（自信息→熵→交叉熵→one-hot）在 $-\log\hat{y}_y$ 处汇合，再经对数变换得作业公式 $\log\sum\exp z_i - z_y$。</p>
+
+<hr>
+<p style="color:#888;font-size:0.85em">用 VS Code Live Preview 或浏览器打开本文件。MathJax 走 CDN，需 Mac 端联网。CMU 10-714 hw0 · Lecture 2 推导流程配套。</p>
+
+<script>
+// ---- 交互式 softmax 条形图 ----
+(function(){
+  const labels = ['类1','类2','类3','类4'];
+  let logits = [2.0, 1.0, 0.1, -1.0];
+  const cols = document.getElementById('sm-cols');
+  const sumEl = document.getElementById('sm-sum');
+  if (!cols) return;
+
+  const PLOT_H = 116;               // 绘图区可用高度上限（留 4px 余量防顶出）
+  const LG_MIN = -3, LG_MAX = 4;    // 滑块范围
+
+  function softmax(z){
+    const m = Math.max(...z);
+    const ex = z.map(v => Math.exp(v - m));   // log-sum-exp trick: 减最大值防溢出
+    const s = ex.reduce((a,b)=>a+b,0);
+    return ex.map(v => v/s);
+  }
+  const clamp = (h) => Math.max(2, Math.min(PLOT_H, h));
+
+  logits.forEach((v,i)=>{
+    const col = document.createElement('div'); col.className='sm-col';
+    col.innerHTML = `
+      <div class="sm-plot">
+        <div class="sm-bar sm-logit" id="lg${i}"></div>
+        <div class="sm-bar sm-prob"  id="pr${i}"></div>
+      </div>
+      <input class="sm-slider" type="range" min="${LG_MIN}" max="${LG_MAX}" step="0.1" value="${v}" id="sl${i}">
+      <div class="sm-val" id="vv${i}"></div>
+      <div class="sm-lbl">${labels[i]}</div>`;
+    cols.appendChild(col);
+    col.querySelector('#sl'+i).addEventListener('input', e=>{
+      logits[i] = parseFloat(e.target.value); render();
+    });
+  });
+
+  function render(){
+    const probs = softmax(logits);
+    logits.forEach((v,i)=>{
+      const lgH = (v - LG_MIN) / (LG_MAX - LG_MIN) * PLOT_H;  // logit 线性映射到绘图区
+      document.getElementById('lg'+i).style.height = clamp(lgH)+'px';
+      document.getElementById('pr'+i).style.height = clamp(probs[i]*PLOT_H)+'px';
+      document.getElementById('vv'+i).textContent = `h=${v.toFixed(1)}\nz=${probs[i].toFixed(2)}`;
+    });
+    sumEl.textContent = probs.reduce((a,b)=>a+b,0).toFixed(2);
+  }
+  render();
+})();
+
+// ---- 矩阵形状单样本/批量切换 ----
+function toggleSingle(){
+  const s = document.getElementById('mat-single');
+  s.style.display = (s.style.display==='none') ? 'flex' : 'none';
+  if (window.MathJax && MathJax.typesetPromise) MathJax.typesetPromise([s]);
+}
+</script>
+
+</body>
+</html>

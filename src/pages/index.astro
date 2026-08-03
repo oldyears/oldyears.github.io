@@ -1,0 +1,41 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+<BaseLayout title="oldyears · 个人站点">
+  <section class="hero">
+    <h1>你好，我是 <span class="hl">oldyears</span> 👋</h1>
+    <p class="lead">
+      这里记录我的学习笔记与随笔。当前在啃 CMU 10-714 深度学习系统，
+      笔记里有公式推导和可交互的可视化。
+    </p>
+  </section>
+
+  <section class="entries">
+    <a href="/notes/" class="card entry">
+      <div class="entry-icon">📘</div>
+      <h2>学习笔记</h2>
+      <p>CMU 10-714 深度学习系统 · softmax、反向传播、自动微分的推导详解，含交互动画。</p>
+      <span class="entry-go">进入专区 →</span>
+    </a>
+    <a href="/blog/" class="card entry">
+      <div class="entry-icon">✍️</div>
+      <h2>博客</h2>
+      <p>随笔与思考 · 电影、阅读与生活。</p>
+      <span class="entry-go">查看文章 →</span>
+    </a>
+  </section>
+
+  <style>
+    .hero { margin-bottom: 40px; }
+    .hero .hl { color: var(--accent); }
+    .lead { color: var(--text-soft); font-size: 1.08em; max-width: 620px; }
+    .entries { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 640px) { .entries { grid-template-columns: 1fr; } }
+    .entry { color: var(--text); display: flex; flex-direction: column; gap: 6px; }
+    .entry:hover { text-decoration: none; }
+    .entry-icon { font-size: 2em; }
+    .entry h2 { margin: 4px 0; }
+    .entry p { color: var(--text-soft); font-size: .95em; margin: 0 0 8px; flex: 1; }
+    .entry-go { color: var(--accent); font-weight: 600; font-size: .9em; }
+  </style>
+</BaseLayout>
