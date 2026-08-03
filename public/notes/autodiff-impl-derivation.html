@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>自动微分的实现：needle 框架 — CMU 10-714 hw1</title>
+<script>
+  MathJax = {
+    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']],
+          displayMath: [['$$', '$$'], ['\\[', '\\]']] },
+    chtml: { scale: 1.05 }
+  };
+</script>
+<script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+         max-width: 820px; margin: 40px auto; line-height: 1.75; padding: 0 24px;
+         color: #1f2328; }
+  h1 { font-size: 1.5em; border-bottom: 2px solid #4a90d9; padding-bottom: 8px; }
+  h2 { font-size: 1.2em; color: #2b5b8c; margin-top: 2.2em; border-left: 4px solid #4a90d9; padding-left: 10px; }
+  h3 { font-size: 1.05em; color: #444; margin-top: 1.6em; }
+  code { background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.92em; color: #c7254e; }
+  pre { background: #f6f8fa; border: 1px solid #e3e8ee; border-radius: 6px; padding: 12px 16px; overflow-x: auto; font-size: 0.86em; line-height: 1.5; }
+  pre code { background: none; color: #1f2328; padding: 0; }
+  .note { background: #eef6ff; border-left: 4px solid #4a90d9; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .meaning { background: #f0fdf4; border-left: 4px solid #22a06b; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  .warn { background: #fff8e6; border-left: 4px solid #d97706; padding: 12px 16px; margin: 16px 0; border-radius: 0 6px 6px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 0.93em; }
+  th, td { border: 1px solid #d0d7de; padding: 8px 10px; text-align: left; }
+  th { background: #f6f8fa; }
+  .step { counter-reset: step; }
+  .step ol { padding-left: 28px; }
+  .step ol > li { margin: 6px 0; }
+  /* ===== 交互组件（沿用前几篇档位，保持跨文件一致）===== */
+  .interactive { background:#fafcff; border:1px solid #cfe0f2; border-radius:8px; padding:18px 22px 16px; margin:24px 0; }
+  .interactive .title { font-weight:600; color:#2b5b8c; margin-bottom:14px; font-size:0.95em; }
+  .interactive .hint { color:#888; font-size:0.82em; margin-top:14px; line-height:1.65; }
+  .toggle-btn { background:#4a90d9; color:#fff; border:none; border-radius:5px; padding:6px 14px; font-size:0.82em; cursor:pointer; }
+  .toggle-btn:hover { background:#3b7bc0; }
+  .toggle-btn:disabled { background:#b8ccdf; cursor:default; }
+  /* eager/lazy 求值对比动画 */
+  .ev-graph { position:relative; height:200px; margin:6px 0; overflow:hidden; }
+  .ev-node { position:absolute; width:56px; height:56px; border-radius:8px; border:2px solid #cdd7e1; background:#f2f5f8;
+             display:flex; flex-direction:column; align-items:center; justify-content:center;
+             font-size:0.8em; color:#5a6673; transition:all .3s ease; }
+  .ev-node .cv { font-size:0.66em; margin-top:2px; }
+  .ev-node.built { border-color:#4a90d9; background:#dbeafe; color:#1e5aa8; }
+  .ev-node.computed { border-color:#22a06b; background:#dcfce7; color:#1a7a4f; box-shadow:0 0 0 3px rgba(34,160,107,.18); }
+  svg.ev-edges { position:absolute; top:0; left:0; width:100%; height:100%; pointer-events:none; }
+  .ev-edge { stroke:#c4cdd6; stroke-width:2; fill:none; marker-end:url(#earr); }
+  .ev-controls { display:flex; align-items:center; gap:10px; margin-top:12px; flex-wrap:wrap; }
+  .ev-mode { display:inline-flex; border:1px solid var(--border,#e3e8ee); border-radius:6px; overflow:hidden; }
+  .ev-mode button { border:none; background:#fff; padding:6px 12px; font-size:0.82em; cursor:pointer; color:#57606a; }
+  .ev-mode button.active { background:#4a90d9; color:#fff; }
+  .ev-status { font-size:0.85em; color:#2b5b8c; font-weight:500; min-height:1.4em; }
+</style>
+</head>
+<body>
+<!-- @note title="自动微分的实现：needle 框架" course="CMU 10-714 · Lecture 5 · hw1" desc="走读 needle 框架：Value/Op/Tensor 如何用计算图承载自动微分，eager/lazy 求值、detach 内存陷阱、gradient 返回 Tensor 为二阶导。" tags="needle,计算图,eager/lazy" -->
+
+<h1>自动微分的实现：needle 框架走读</h1>
+<p style="color:#666">CMU 10-714 Deep Learning Systems · Homework 1 · 按 Lecture 5（Automatic Differentiation Implementation, Tianqi Chen）代码走读整理</p>
+
+<div class="note">
+<strong>这份文档回答：</strong>上一课（Lec4）讲了反向模式 AD 的<strong>算法</strong>，这一课讲它的<strong>实现</strong>——你要在 hw1 里补全的 needle 框架，到底怎么用几个类（Value / Op / Tensor）把"计算图 + 自动微分"落成 ~1000 行 Python？搞懂这套脚手架，才知道 hw1 的 <code>compute</code> / <code>gradient</code> 该往哪填。
+</div>
+
+<div class="warn">
+<strong>来源说明</strong>：主线整理自 <strong>Lecture 5（Automatic Differentiation Implementation, Tianqi Chen）</strong> 的 YouTube 字幕（<code>cNADlHfHQHg</code>），标注"讲课"处均出自该字幕。附录为补充的默认知识，<strong>非讲课原话</strong>。本文只讲框架机制与思路，不含作业待填函数的实现。前置请先读 <a href="autodiff-derivation.html">autodiff-derivation.html</a>（Lec4 算法）。
+</div>
+
+<h2 id="framework">0. 坐标系：从算法到脚手架</h2>
+
+<p>Lec4 证明了反向模式 AD 的算法（伴随值反向递推 + 扩展计算图）。这一课是<strong>实现课</strong>——TQ 直接走读 needle 的代码库，讲清楚支撑那套算法的数据结构。needle = <strong>N</strong>ecessary <strong>E</strong>lements of <strong>D</strong>eep <strong>L</strong>earning（也双关"缝衣针"，把神经网络缝起来）。</p>
+
+<div class="meaning">
+<strong>为什么值得单独一课</strong>：算法看懂 ≠ 会实现。TQ 指出整个 needle 才 ~1000 行（autograd ~400 + ops ~300），却含深度学习框架的全部基本元素。hw1 就是补全其中的空。这一课的目的：让你知道每个类的职责、数据往哪流，再去填 <code>compute</code>/<code>gradient</code> 才不盲目。
+</div>
+
+<h2 id="three-classes">1. 三个核心类：Value / Op / Tensor</h2>
+
+<table>
+<tr><th>类</th><th>职责</th><th>关键点</th></tr>
+<tr><td><strong>Value</strong></td><td>计算图里的一个<strong>节点</strong>（一个中间值）</td><td>不只存数据，还存"怎么算出来的"</td></tr>
+<tr><td><strong>Op</strong></td><td>一种<strong>运算</strong>（加、乘、exp…）</td><td>每个 op 定义 <code>compute</code> + <code>gradient</code></td></tr>
+<tr><td><strong>Tensor</strong></td><td>Value 的<strong>子类</strong>，用户直接用的张量</td><td>几乎不加字段，全继承自 Value</td></tr>
+</table>
+
+<h3>1.1 Value 的字段：为什么张量不只是"一坨数据"</h3>
+
+<p>朴素想法：张量 = 一个多维数组。但 needle 的 Value 有<strong>四组</strong>字段，远超"存数据"：</p>
+
+<pre><code>class Value:
+    cached_data   # NDArray：算出来的数据（≈ numpy 数组）
+    op            # Op：这个值由哪个运算得到（叶子节点为 None）
+    inputs        # List[Value]：喂给该运算的输入节点
+    requires_grad # bool：是否要对它求梯度</code></pre>
+
+<div class="meaning">
+<strong>关键洞察</strong>：<code>op</code> + <code>inputs</code> 记录了"这个值<strong>怎么来的</strong>"——把 Lec4 的计算图<strong>编码进了数据结构本身</strong>。$v_4 = v_2 \cdot v_3$ 就表示成：<code>v4.op</code> = 乘法、<code>v4.inputs</code> = [v2, v3]。顺着 <code>inputs</code> 往回走就能遍历整张计算图（DAG）——这正是反向传播要的。叶子节点（输入）<code>op=None</code>、<code>inputs=[]</code>，数据直接在 <code>cached_data</code>。
+</div>
+
+<h3>1.2 Op 的两个方法：compute 与 gradient</h3>
+
+<p>每个 Op 子类（如 <code>EWiseAdd</code>、<code>AddScalar</code>、<code>EWiseMul</code>）实现两个方法：</p>
+
+<table>
+<tr><th>方法</th><th>输入类型</th><th>职责</th></tr>
+<tr><td><code>compute(*args)</code></td><td><strong>NDArray</strong>（裸数组）</td><td>前向：给底层数组，算出输出数组</td></tr>
+<tr><td><code>gradient(out_grad, node)</code></td><td><strong>Tensor</strong>（计算图节点）</td><td>反向：给输出伴随，算各输入的部分伴随（VJP）</td></tr>
+</table>
+
+<div class="warn">
+<strong>最容易忽略、也最关键的一点</strong>：<code>compute</code> 收/发 <strong>NDArray</strong>（只算数值），<code>gradient</code> 收/发 <strong>Tensor</strong>（构建新计算图）。为什么 gradient 不直接算数值？因为<strong>梯度本身也要能再求梯度</strong>（gradient of gradient，Lec4 讲的二阶导免费）。gradient 里做的每个运算都会再建计算图节点，于是伴随值也是一张可微的图。这是 hw1 里 <code>gradient</code> 必须返回 Tensor（而非 numpy）的根本原因。
+</div>
+
+<h2 id="graph-build">2. 计算图怎么建起来：x1 + x2 背后发生了什么</h2>
+
+<p>写 <code>y = x1 + x2</code>，TQ 一步步追踪调用链：</p>
+
+<div class="step">
+<ol>
+<li><code>__add__</code> 运算符重载 → 检测到两个 Tensor → 调 <code>EWiseAdd()(x1, x2)</code></li>
+<li><code>TensorOp.__call__</code> → <code>Tensor.make_from_op(op, inputs)</code></li>
+<li><code>make_from_op</code> 用 <code>Tensor.__new__</code> 造对象（绕开面向用户的 <code>__init__</code>），再 <code>_init</code> 填字段：op、inputs、requires_grad…</li>
+<li><strong>但 <code>_init</code> 不做加法计算</strong>——只填元数据。真正的加法在 <code>realize_cached_data()</code> 里</li>
+</ol>
+</div>
+
+<div class="meaning">
+<strong>拆两半的意义</strong>：<strong>建图</strong>（填 op/inputs）和<strong>算数</strong>（realize_cached_data 调 op.compute）是分开的两步。这就为下一节的 eager/lazy 两种模式留了口子——建图后立刻算 = eager，先只建图、要用时才算 = lazy。
+</div>
+
+<h2 id="eager-lazy">3. eager vs lazy：什么时候真正做计算</h2>
+
+<p>建图和求值分离后，有两种策略：</p>
+
+<div class="interactive" id="ev-demo">
+  <div class="title">🎬 交互：eager 与 lazy 两种求值模式对比</div>
+  <div class="ev-mode" id="ev-mode">
+    <button data-mode="eager" class="active">Eager 模式</button>
+    <button data-mode="lazy">Lazy 模式</button>
+  </div>
+  <div class="ev-graph" id="ev-graph"></div>
+  <div class="ev-controls">
+    <button class="toggle-btn" id="ev-step">下一步 ▶</button>
+    <button class="toggle-btn" id="ev-reset">重置</button>
+    <span class="ev-status" id="ev-status">选模式，点"下一步"逐步构建 v₂=exp(v₁), v₃=v₂+1, v₄=v₂·v₃</span>
+  </div>
+  <div class="hint">
+    <span style="color:#1e5aa8;font-weight:600">蓝色</span> = 节点已建（op/inputs 就位，cached_data 仍空）；
+    <span style="color:#1a7a4f;font-weight:600">绿色</span> = cached_data 已算出。<br>
+    <strong>Eager</strong>：每建一个节点立刻算（建完即绿）。<strong>Lazy</strong>：先把图建完（全蓝），最后一次性触发计算（末尾统一变绿）——需要数据时（<code>.numpy()</code>/<code>.shape</code>）才 realize。
+  </div>
+</div>
+
+<table>
+<tr><th></th><th>Eager（needle/PyTorch 默认）</th><th>Lazy</th></tr>
+<tr><td>何时算</td><td>建图同时立刻算</td><td>先建图，用到时才算</td></tr>
+<tr><td>优点</td><td>建图开销被计算掩盖；调试直观</td><td>能看到整张图，做算子融合等优化</td></tr>
+<tr><td>代价</td><td>看不到全局图，难优化</td><td>建图与计算分离</td></tr>
+</table>
+
+<div class="meaning">
+<strong>讲课实例</strong>：<code>needle.autograd.LAZY_MODE=True</code> 后，<code>y=x1+x2</code> 的 <code>cached_data</code> 是 <code>None</code>，直到 <code>y.numpy()</code> 才触发 <code>realize_cached_data</code>。TQ 提到 PyTorch 的 TPU 后端（XLA）就用 lazy tensor 攒一批再算。needle 默认 eager，但两种都支持。
+</div>
+
+<h2 id="detach">4. 内存陷阱：为什么循环累加会爆内存</h2>
+
+<p>TQ 举了个"跑几轮就 OOM"的真实场景：</p>
+
+<pre><code>sum_loss = ndl.Tensor(0)
+for i in range(100):
+    sum_loss = sum_loss + x * x   # 看似只留一个变量</code></pre>
+
+<div class="warn">
+<strong>陷阱</strong>：<code>sum_loss</code> 看似单个变量，但它是<strong>计算图节点</strong>——每轮的 <code>+</code> 都把上一轮整条图挂进 <code>inputs</code>。100 轮后 <code>sum_loss</code> 拖着一条 100 节点的长链，全在内存里。这正是 PyTorch 训练循环 OOM 的常见原因。
+</div>
+
+<div class="meaning">
+<strong>解法：detach</strong>。<code>y.detach()</code> 返回一个新 Tensor，只含 <code>cached_data</code>、<code>inputs=[]</code>、<code>op=None</code>——<strong>斩断计算图，只留数值</strong>。当你确定不再需要对某个量求梯度时（如累加纯标量 loss 做显示），detach 掉，图就不会无限增长。PyTorch 里对应 <code>.detach()</code> / <code>torch.no_grad()</code>。这是"框架能追踪计算图"的副作用——好处是能自动求导，代价是不主动切断就会一直攒图。
+</div>
+
+<h2 id="gradient-tensor">5. gradient 为什么返回 Tensor（呼应 Lec4 的二阶导）</h2>
+
+<p>回到 §1.2 埋的伏笔。以 $v_4 = v_2 \cdot v_3$ 为例，其 <code>gradient</code> 要算两个部分伴随（Lec4 的规则）：</p>
+<p>$$ \overline{v_{2\to4}} = \bar v_4 \cdot \frac{\partial v_4}{\partial v_2} = \bar v_4 \cdot v_3, \qquad \overline{v_{3\to4}} = \bar v_4 \cdot v_2 $$</p>
+
+<p>needle 里 <code>EWiseMul.gradient(out_grad, node)</code> 就返回 <code>(out_grad * v3, out_grad * v2)</code>——注意这里的 <code>*</code> 又是 needle 运算，<strong>会再建计算图节点</strong>。</p>
+
+<div class="meaning">
+<strong>为什么这样设计</strong>（Lec4 的实现落地）：因为 <code>gradient</code> 用的是 Tensor、返回的伴随值也是计算图，所以对 <code>sum_loss</code> 的梯度 $\bar v$ 还能<strong>再求梯度</strong>——二阶导免费。对比 <code>compute</code> 只吐 NDArray（纯数值、不建图），职责清晰：<code>compute</code> 管"怎么算数"，<code>gradient</code> 管"怎么建可微的梯度图"。<br>
+框架还提供 <code>op.gradient_as_tuple(...)</code>，无论 gradient 返回单值还是多值，统一成 tuple，方便反向遍历时处理。
+</div>
+
+<h2 id="homework">6. 和作业 hw1 的对应关系（给思路，不给实现）</h2>
+
+<table>
+<tr><th>hw1 题目</th><th>对应本文 / 要填什么</th></tr>
+<tr><td><strong>Q1 前向计算</strong></td><td>各 Op 的 <code>compute(*args)</code>：给 NDArray，用 <code>array_api</code>（现为 numpy）算输出数组（§1.2）</td></tr>
+<tr><td><strong>Q2 反向计算</strong></td><td>各 Op 的 <code>gradient(out_grad, node)</code>：返回 Tensor，用 needle 运算构建部分伴随（§5）</td></tr>
+<tr><td><strong>Q3 拓扑排序</strong></td><td>顺 <code>value.inputs</code> 遍历 DAG，得逆拓扑序（§1.1）</td></tr>
+<tr><td><strong>Q4 反向模式微分</strong></td><td>把各 Op 的 gradient 用 <code>node_to_grad</code> 串起来（Lec4 §4.1）</td></tr>
+</table>
+
+<div class="meaning">
+<strong>实现思路（不含代码）</strong>：hw1 就是往 needle 的 <code>ops.py</code>（各 op 的 compute/gradient）和 <code>autograd.py</code>（反向遍历）里那些 <code>### BEGIN YOUR SOLUTION</code> 段填空。本课告诉你每个空的<strong>类型契约</strong>：compute 收发 NDArray、gradient 收发 Tensor。<code>array_api</code> 现在是 numpy，将来换成自研 NDArray（GPU），所以用 <code>array_api.exp</code> 而非 <code>numpy.exp</code>。<br>
+<em>按 <a href="softmax-loss-derivation.html">no-solution-before-self-attempt</a> 原则：只给类型契约与数据流，具体每个 op 怎么写留给你自己。卡住时用 Lec4 的数值梯度检查定位是哪个 op 的 gradient 错了。</em>
+</div>
+
+<h2 id="knowledge-network">7. 与其它章节的联系</h2>
+
+<table>
+<tr><th>方向</th><th>关系</th><th>去向</th></tr>
+<tr>
+  <td><strong>← 前置</strong></td>
+  <td>Lec4 讲反向模式 AD <strong>算法</strong>（伴随值、扩展计算图、二阶导）；本课是它的<strong>代码落地</strong>。§5 的 gradient 返回 Tensor 正是 Lec4"扩展计算图"的实现</td>
+  <td><a href="autodiff-derivation.html">autodiff-derivation.html</a>（Lec4）</td>
+</tr>
+<tr>
+  <td><strong>→ 上层抽象</strong></td>
+  <td>needle 的 Value/Op 是内核，后续在其上建 nn.Module、优化器、各种层</td>
+  <td>[[lec7-nn-library]]（hw2+）</td>
+</tr>
+<tr>
+  <td><strong>→ 换后端</strong></td>
+  <td>本课 <code>array_api</code>=numpy，后续换成自研 NDArray 跑 GPU，needle 上层代码不变</td>
+  <td>[[lec11-hardware-accel]]（hw3）</td>
+</tr>
+</table>
+
+<div class="meaning">
+<strong>知识网络主线</strong>：<code>softmax(Lec2)</code> → <code>backprop(Lec3)</code> → <code>autodiff 算法(Lec4)</code> → <strong><code>autodiff 实现·needle(本文, Lec5)</code></strong> → <code>NN 库(Lec7+)</code>。到本课，从"手推梯度"到"框架自动求导"的闭环完成：Lec4 给算法，Lec5 给能跑的代码骨架。往后都在 needle 之上盖楼。
+</div>
+
+<h2 id="math-knowledge">8. 关键概念汇总</h2>
+
+<table>
+<tr><th>概念</th><th>作用</th><th>要点</th></tr>
+<tr><td><strong>Value 节点</strong></td><td>计算图的节点</td><td>op+inputs 编码"怎么来的"，非仅存数据</td></tr>
+<tr><td><strong>Op.compute</strong></td><td>前向数值计算</td><td>收发 NDArray，用 array_api</td></tr>
+<tr><td><strong>Op.gradient</strong></td><td>反向建梯度图</td><td>收发 Tensor，为二阶导</td></tr>
+<tr><td><strong>make_from_op</strong></td><td>内部构造图节点</td><td>建图与算数分离</td></tr>
+<tr><td><strong>eager/lazy</strong></td><td>求值时机</td><td>默认 eager；lazy 便于全局优化</td></tr>
+<tr><td><strong>detach</strong></td><td>斩断计算图</td><td>防循环累加 OOM</td></tr>
+<tr><td><strong>array_api</strong></td><td>后端数组接口</td><td>现 numpy，将来换 GPU NDArray</td></tr>
+</table>
+
+<div class="note">
+<strong>一句话总览（讲课主线）</strong>：needle=Value+Op+Tensor 三类 → Value 用 op+inputs 把计算图编码进数据结构 → <code>x1+x2</code> 经运算符重载 → make_from_op 建图、realize_cached_data 算数（分离）→ eager 立刻算 / lazy 攒着算 → detach 斩图防 OOM → gradient 返回 Tensor 而非数值，因为梯度也要可微（二阶导）→ 这套 ~1000 行骨架就是 hw1 要填的空。
+</div>
+
+<h2 id="appendix-a">附录 A：__new__ vs __init__ 为什么要用前者建图（默认知识）</h2>
+
+<p>讲课提到 <code>make_from_op</code> 用 <code>Tensor.__new__</code> 而非直接构造。补充原理：</p>
+<div class="meaning">
+<strong>最好理解的角度</strong>：Python 建对象两步——<code>__new__</code> 分配实例、<code>__init__</code> 初始化。needle 的 <code>__init__</code> 已被<strong>面向用户</strong>占用（接收 numpy 数组/列表造张量）。但内部建图节点时，数据来自"op 作用于 inputs"，不是用户传的数组。若复用 <code>__init__</code> 会语义冲突。于是用 <code>__new__</code> 拿到空实例，再调内部 <code>_init</code> 填 op/inputs 等字段——两条构造路径互不干扰：用户路径走 <code>__init__</code>，框架内部路径走 <code>__new__</code> + <code>_init</code>。
+</div>
+
+<h2 id="appendix-b">附录 B：requires_grad 的传播规则（默认知识）</h2>
+<div class="meaning">
+<strong>最好理解的角度</strong>：<code>_init</code> 里算一个节点的 <code>requires_grad</code> 规则是——<strong>只要任一输入需要梯度，本节点就需要</strong>（逻辑或）。直觉：梯度要能从需要求导的叶子（如参数）一路传到输出，中途每个节点都得在"可微链"上。反之，若所有输入都不需要梯度（如纯常量运算），本节点也不必留梯度信息，省内存。这跟 §4 的 detach 是一体两面：detach 手动把 requires_grad 断掉，这里是自动按输入推导。
+</div>
+
+<hr>
+<p style="color:#888;font-size:0.85em">用 VS Code Live Preview 或浏览器打开本文件。MathJax 走 CDN，需 Mac 端联网。CMU 10-714 hw1 · Lecture 5 代码走读配套。</p>
+
+<script>
+// ===== eager/lazy 求值对比动画（纯原生 JS + SVG）=====
+(function(){
+  const graph = document.getElementById('ev-graph');
+  const status = document.getElementById('ev-status');
+  const btnStep = document.getElementById('ev-step');
+  const btnReset = document.getElementById('ev-reset');
+  const modeBox = document.getElementById('ev-mode');
+  if (!graph) return;
+
+  let mode = 'eager';
+  const nodes = [
+    {id:'v1', x:40,  y:74, label:'v₁', desc:'输入'},
+    {id:'v2', x:230, y:74, label:'v₂', desc:'exp(v₁)'},
+    {id:'v3', x:420, y:24, label:'v₃', desc:'v₂+1'},
+    {id:'v4', x:420, y:124,label:'v₄', desc:'v₂·v₃'},
+  ];
+  const edges = [['v1','v2'],['v2','v3'],['v2','v4'],['v3','v4']];
+  const NS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(NS,'svg'); svg.setAttribute('class','ev-edges');
+  svg.innerHTML=`<defs><marker id="earr" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#c4cdd6"/></marker></defs>`;
+  graph.appendChild(svg);
+  const pos={}; nodes.forEach(n=>pos[n.id]={x:n.x+28,y:n.y+28});
+  edges.forEach(([a,b])=>{
+    const p=document.createElementNS(NS,'path');
+    const x1=pos[a].x,y1=pos[a].y,x2=pos[b].x-28,y2=pos[b].y,mx=(x1+x2)/2;
+    p.setAttribute('d',`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    p.setAttribute('class','ev-edge'); svg.appendChild(p);
+  });
+  const el={};
+  nodes.forEach(n=>{
+    const d=document.createElement('div'); d.className='ev-node';
+    d.style.left=n.x+'px'; d.style.top=n.y+'px';
+    d.innerHTML=`${n.label}<span class="cv">${n.desc}</span>`;
+    graph.appendChild(d); el[n.id]=d;
+  });
+
+  const order=['v1','v2','v3','v4'];
+  let cur=0;
+  function reset(){
+    cur=0; Object.values(el).forEach(e=>e.className='ev-node');
+    status.textContent = mode==='eager'
+      ? 'Eager：每建一个节点立刻算（建完即绿）'
+      : 'Lazy：先建完整张图（全蓝），最后统一触发计算';
+  }
+  function step(){
+    if (mode==='eager'){
+      if (cur>=order.length){ status.textContent='完成：每步都即时算出 cached_data'; return; }
+      const id=order[cur]; el[id].classList.add('built','computed');
+      status.textContent=`Eager：建 ${id} 并立刻算出 cached_data`;
+      cur++;
+    } else {
+      if (cur<order.length){
+        const id=order[cur]; el[id].classList.add('built');
+        status.textContent=`Lazy：建 ${id}（cached_data 仍为 None）`;
+        cur++;
+      } else if (cur===order.length){
+        order.forEach(id=>el[id].classList.add('computed'));
+        status.textContent='Lazy：调 .numpy() → realize_cached_data 一次性算完整张图';
+        cur++;
+      }
+    }
+  }
+  btnStep.addEventListener('click',step);
+  btnReset.addEventListener('click',reset);
+  modeBox.querySelectorAll('button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      modeBox.querySelectorAll('button').forEach(x=>x.classList.remove('active'));
+      b.classList.add('active'); mode=b.dataset.mode; reset();
+    });
+  });
+  reset();
+})();
+</script>
+
+</body>
+</html>
