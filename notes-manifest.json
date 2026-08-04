@@ -31,5 +31,16 @@
       "计算图",
       "动画"
     ]
+  },
+  {
+    "file": "autodiff-impl-derivation.html",
+    "title": "自动微分的实现：needle 框架",
+    "course": "CMU 10-714 · Lecture 5 · hw1",
+    "desc": "走读 needle 框架：Value/Op/Tensor 如何用计算图承载自动微分，eager/lazy 求值、detach 内存陷阱、gradient 返回 Tensor 为二阶导。",
+    "tags": [
+      "needle",
+      "计算图",
+      "eager/lazy"
+    ]
   }
 ]
