@@ -347,6 +347,39 @@ $$ G_1 = \mathbf{1}\{Z_1>0\}\circ (G_2 W_2^\top) $$
 <strong>为什么"标量作弊法"最后能对</strong>：矩阵/张量求导的严格结果，逐元素展开后<strong>本质就是标量链式法则的堆叠</strong>；作弊法跳过了张量记号的繁琐，直接假装标量算，再靠"形状唯一性"把各因子拼回矩阵。多数情况下形状约束强到只有一种合法拼法（如 §4.1），所以能凑对——但不保证，故必须数值验证兜底。这也是 hw2 要实现梯度检查的原因。
 </div>
 
+<h2 id="appendix-c">附录 C：偏导矩阵——梯度、Jacobian、Hessian 的统一视角（默认知识）</h2>
+
+<p>本文和 <a href="autodiff-derivation.html">autodiff</a>、<a href="optimization-derivation.html">optimization</a> 反复出现"对矩阵/向量求导"，这里统一讲清"偏导矩阵"这个底层概念，其它篇用到时链回这里。</p>
+
+<h3>C.1 一个统一的定义：把所有偏导排成阵列</h3>
+<p>"偏导矩阵"不是某个特定对象，而是<strong>把一堆偏导数按输入/输出的下标排成阵列</strong>。三个常见特例，只是"谁对谁求导、排成什么形状"的不同：</p>
+<table>
+<tr><th>名字</th><th>谁对谁</th><th>形状</th><th>第 (i,j) 元</th></tr>
+<tr><td><strong>梯度</strong> $\nabla_\theta f$</td><td>标量 $f$ 对向量/矩阵 $\theta$</td><td>与 $\theta$ 同形</td><td>$\partial f / \partial \theta_{ij}$</td></tr>
+<tr><td><strong>Jacobian</strong> $J$</td><td>向量 $y\in\mathbb{R}^m$ 对向量 $x\in\mathbb{R}^n$</td><td>$m\times n$</td><td>$\partial y_i / \partial x_j$</td></tr>
+<tr><td><strong>Hessian</strong> $H$</td><td>标量 $f$ 对向量 $x$ 的<strong>二阶</strong></td><td>$n\times n$</td><td>$\partial^2 f / \partial x_i \partial x_j$</td></tr>
+</table>
+
+<div class="meaning">
+<strong>最好理解的角度</strong>：一维时导数就一个数；多维时"导数"要对<strong>每一对(输出分量, 输入分量)</strong>各算一个偏导，自然排成阵列。梯度是"标量对多输入"→ 排成和输入同形；Jacobian 是"多输出对多输入"→ 排成 $m\times n$ 表；Hessian 是"标量求两次"→ 对每对输入分量各一个 → $n\times n$。记住一句：<strong>偏导矩阵的形状 = (输出的形状) × (输入的形状)</strong>，逐分量填偏导。
+</div>
+
+<h3>C.2 偏导矩阵怎么读、怎么用</h3>
+<ul>
+<li><strong>梯度</strong>：指向 $f$ 增长最快的方向，反向走就是梯度下降（见 <a href="optimization-derivation.html">optimization §2</a>）。本文 $\nabla_{W_1}\ell$、$\nabla_{W_2}\ell$ 就是标量 loss 对权重矩阵的梯度，形状与 $W$ 同。</li>
+<li><strong>Jacobian</strong>：一层的输出对输入的偏导矩阵。反向传播的"每层乘自己的导数"（<a href="autodiff-derivation.html">autodiff §6</a> 的 vector-Jacobian product）里，那个"导数"就是 Jacobian。多数时候不显式造出整个 $J$，而是直接算"伴随向量 × J"。</li>
+<li><strong>Hessian</strong>：二阶信息，Newton 法要用（见 <a href="optimization-derivation.html">optimization §3</a>）。深度学习里 $n$ 太大存不下，所以不直接用。</li>
+</ul>
+
+<h3>C.3 为什么反向传播里"链式法则"= Jacobian 连乘</h3>
+<p>Lec3 手推、Lec4 自动化的链式法则，用偏导矩阵看就是：$L$ 层网络 $x \to z_1 \to \cdots \to z_L \to \ell$，则</p>
+<p>$$ \frac{\partial \ell}{\partial x} = \frac{\partial \ell}{\partial z_L}\, \frac{\partial z_L}{\partial z_{L-1}} \cdots \frac{\partial z_1}{\partial x} $$</p>
+<p>每个 $\frac{\partial z_{i}}{\partial z_{i-1}}$ 都是一个 Jacobian。反向模式 AD 从左往右乘（先乘输出端的行向量伴随），全程只做"向量 × 矩阵"，避免造出巨大的中间 Jacobian——这正是它对"少输出多输入"高效的原因（<a href="autodiff-derivation.html">autodiff 附录 B</a>）。</p>
+
+<div class="note">
+<strong>形状自检口诀</strong>：任何时候写偏导矩阵，先问"输出多大、输入多大"，形状就定了；再问"第 (i,j) 元是谁对谁的偏导"，内容就定了。本文 §4.1 的"标量作弊法+形状对齐"能凑对，底层依据就是偏导矩阵的形状唯一性。
+</div>
+
 <hr>
 <p style="color:#888;font-size:0.85em">用 VS Code Live Preview 或浏览器打开本文件。MathJax 走 CDN，需 Mac 端联网。CMU 10-714 hw0 · Lecture 3 推导流程配套。</p>
 
@@ -439,5 +472,6 @@ $$ G_1 = \mathbf{1}\{Z_1>0\}\circ (G_2 W_2^\top) $$
 })();
 </script>
 
+<script src="assist.js"></script>
 </body>
 </html>
