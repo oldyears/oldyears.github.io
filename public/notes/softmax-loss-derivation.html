@@ -215,7 +215,7 @@ $$\boxed{\;\ell_{\mathrm{softmax}}(z, y) = \log \sum_{i=1}^{k} \exp z_i \;-\; z_
 
 <p><strong>第一项</strong> $\log\sum_i \exp z_i$：令 $S=\sum_i\exp z_i$，</p>
 <p>$$ \frac{\partial}{\partial z_i}\log S = \frac{1}{S}\cdot\frac{\partial S}{\partial z_i} = \frac{1}{S}\cdot\exp z_i = \frac{\exp z_i}{\sum_j\exp z_j} = z_i^{\text{prob}} $$</p>
-<p>结果正是 softmax 概率本身。这里上标 $\text{prob}$ 只是<strong>记号</strong>（不是幂、不是指数）：$z_i$ 指原始 logit（可正可负、不归一），$z_i^{\text{prob}}$ 指它经 softmax 后的概率（落在 $[0,1]$、各分量和为 1），用来和原始 logit 区分——作业记号里图省事直接用 $z$ 表示概率，就是这里的 $z^{\text{prob}}$。</p>
+<p>结果正是 softmax 概率本身。</p>
 
 <p><strong>第二项</strong> $-z_y$：对 $z_i$ 的偏导是 $-\mathbf{1}\{i=y\} = -(e_y)_i$（只有 $i=y$ 时为 $-1$，否则 0）。</p>
 
@@ -516,6 +516,5 @@ function toggleSingle(){
 }
 </script>
 
-<script src="../assist.js"></script>
 </body>
 </html>

@@ -42,16 +42,5 @@
       "计算图",
       "eager/lazy"
     ]
-  },
-  {
-    "file": "optimization-derivation.html",
-    "title": "优化方法与初始化",
-    "course": "CMU 10-714 · Lecture 6 · hw2",
-    "desc": "全连接网络(bias/broadcasting)、优化器(GD/Newton/Momentum/Nesterov/Adam)、SGD、为何不能零初始化与 Kaiming 方差推导。含优化器轨迹对比交互。",
-    "tags": [
-      "optimization",
-      "Adam",
-      "初始化"
-    ]
   }
 ]
