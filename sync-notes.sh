@@ -75,14 +75,17 @@ for r in records:
     open(os.path.join(dest, r["file"]), 'w', encoding='utf-8').write(html)
     print(f"  ✓ {r['source']} → notes/{r['file']}  [{r['title']}]")
 
-# 2b. 拷贝共用辅助脚本 (assist.js)
+# 2b. 拷贝共用辅助脚本
+#     assist.js        — 旧「选中即问」，笔记已不再引用，保留兼容
+#     notes-comment.js — 「选中评论」侧栏；无 token 时完全静默，公开访客无感知
 import shutil
-assist = os.path.join(src_root, "cmu-dlsys", "homework", "assist.js")
-if os.path.exists(assist):
-    shutil.copy2(assist, os.path.join(dest, "assist.js"))
-    print(f"  ✓ cmu-dlsys/homework/assist.js → notes/assist.js")
-else:
-    print(f"  ⚠ assist.js 未找到 {assist}，跳过")
+for helper in ("assist.js", "notes-comment.js"):
+    hp = os.path.join(src_root, "cmu-dlsys", "homework", helper)
+    if os.path.exists(hp):
+        shutil.copy2(hp, os.path.join(dest, helper))
+        print(f"  ✓ cmu-dlsys/homework/{helper} → notes/{helper}")
+    else:
+        print(f"  ⚠ {helper} 未找到 {hp}，跳过")
 
 # 3. 生成 manifest（去掉 source 字段，站点只需展示用信息；保留 file/title/course/desc/tags）
 out = [{k: v for k, v in r.items() if k != "source"} for r in records]
