@@ -370,6 +370,16 @@
 })();
 </script>
 
-<script src="assist.js"></script>
+<!-- 评论系统：本地在上层目录，线上被同步脚本拍平到同目录；无 token 时脚本完全静默 -->
+<script>
+(function () {
+  var local = location.protocol === "file:" ||
+              /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  var s = document.createElement("script");
+  s.src = local ? "../notes-comment.js" : "notes-comment.js";
+  s.onerror = function () { /* 脚本缺失不影响阅读 */ };
+  document.body.appendChild(s);
+})();
+</script>
 </body>
 </html>
